@@ -45,7 +45,7 @@ const SAMPLE_PRODUCTS = [
   { id: 110, name: "키트 (팩2ea+크림미니+스킨베이스미니)", price: 10000, minQty: 1   },
 ];
 const COMPANY_BANK         = { bank: "국민은행", account: "770601-00-091438", holder: "주식회사 고혼진리퍼블릭" };
-const DEPT_LIST            = ["경영지원","디자인","미디어 컨텐츠","영업부","영업지원","재무회계","해외사업"];
+const DEPT_LIST            = ["경영지원부","디자인팀","미디어컨텐츠본부","영업본부","영업지원부","재무회계부","해외사업부","허브물류센터","R&D사업본부"];
 const SAMPLE_MONTHLY_LIMIT = 200000;
 const ADMIN_ID             = "admin";
 const ADMIN_PW             = "1234";
@@ -1278,7 +1278,7 @@ function EmployeeManager({ employees, onReload }) {
   const downloadTemplate = () => {
     const ws = XLSX.utils.aoa_to_sheet([
       ['이름','부서','입사일'],
-      ['홍길동','영업부','2024-01-15'],
+      ['홍길동','영업본부','2024-01-15'],
       ['김철수','디자인','2023-06-20'],
     ]);
     ws['!cols'] = [{wch:12},{wch:16},{wch:14}];
