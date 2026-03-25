@@ -170,6 +170,11 @@ const GLOBAL_CSS = `
     .rule-div  { width: 100% !important; height: 1px !important; margin: 10px 0 !important; }
     .stat-grid { grid-template-columns: 1fr 1fr !important; }
     .detail-grid { grid-template-columns: 1fr !important; }
+    .info-grid { grid-template-columns: 1fr !important; }
+    .ship-panels { flex-direction: column !important; }
+    .ship-sidebar { width: 100% !important; }
+    .emp-add-grid { grid-template-columns: 1fr 1fr !important; }
+    .admin-header-btns { flex-wrap: wrap !important; }
   }
 `;
 const FF = "'Noto Sans KR','Apple SD Gothic Neo',sans-serif";
@@ -208,7 +213,6 @@ function EmployeePage({ notice, onAdmin }) {
   const [empError,    setEmpError]    = useState("");
   const [myApps,      setMyApps]      = useState([]);
   const [myAppsLoading, setMyAppsLoading] = useState(false);
-  const [showMyApps,  setShowMyApps]  = useState(false);
   const debRef = useRef(null);
 
   // 직원 목록 로드
@@ -228,14 +232,17 @@ function EmployeePage({ notice, onAdmin }) {
     setEmpError("");
   }, [form.name, form.dept, employees]);
 
-  // 구매 이력 조회
+  // 구매 이력 & 내 신청 내역 자동 조회
   useEffect(() => {
     clearTimeout(debRef.current);
-    if (!form.name.trim() || !form.dept) { setRestrictions({}); setSampleUsed(0); return; }
+    if (!form.name.trim() || !form.dept) { setRestrictions({}); setSampleUsed(0); setMyApps([]); setMyAppsLoading(false); return; }
+    setMyAppsLoading(true);
     debRef.current = setTimeout(async () => {
       const apps = await loadApplications();
       setRestrictions(getRestrictions(apps, form.name.trim(), form.dept));
       setSampleUsed(getSampleUsed(apps, form.name.trim(), form.dept));
+      setMyApps(apps.filter(a => a.name === form.name.trim() && a.dept === form.dept));
+      setMyAppsLoading(false);
     }, 400);
   }, [form.name, form.dept]);
 
@@ -431,7 +438,7 @@ function EmployeePage({ notice, onAdmin }) {
       {/* 신청자 정보 */}
       <div style={CARD}>
         <SLabel>신청자 정보</SLabel>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <div className="info-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
           <SField label="이름" required error={errors.name}>
             <input style={BINP(errors.name)} placeholder="홍길동" value={form.name}
               onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
@@ -444,56 +451,50 @@ function EmployeePage({ notice, onAdmin }) {
             </select>
           </SField>
           {empError && <div style={{ gridColumn:"span 2", background:"#FEF2F2", color:"#DC2626", fontSize:13, padding:"10px 14px", borderRadius:8, fontWeight:600 }}>🚫 {empError}</div>}
-          <div style={{ gridColumn: "span 2" }}>
-            <SField label="신청일자">
-              <DatePickerInput style={INP} value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
-            </SField>
-          </div>
         </div>
       </div>
 
       {/* 내 신청 내역 */}
       {form.name.trim() && form.dept && (
         <div style={CARD}>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: showMyApps ? 14 : 0 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
             <SLabel>📋 내 신청 내역</SLabel>
             <button style={BS} onClick={async () => {
-              if (!showMyApps) {
-                setMyAppsLoading(true);
-                const all = await loadApplications();
-                setMyApps(all.filter(a => a.name === form.name.trim() && a.dept === form.dept));
-                setMyAppsLoading(false);
-              }
-              setShowMyApps(v => !v);
-            }}>
-              {showMyApps ? "닫기" : "조회하기"}
-            </button>
+              setMyAppsLoading(true);
+              const all = await loadApplications();
+              setMyApps(all.filter(a => a.name === form.name.trim() && a.dept === form.dept));
+              setMyAppsLoading(false);
+            }}>🔄 새로고침</button>
           </div>
-          {showMyApps && (
-            myAppsLoading
-              ? <div style={{ textAlign:"center", padding:20, color:"#9CA3AF" }}>조회 중...</div>
-              : myApps.length === 0
-                ? <div style={{ textAlign:"center", padding:20, color:"#9CA3AF" }}>신청 내역이 없습니다.</div>
-                : <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                    {myApps.map(a => (
-                      <div key={a.id} style={{ border:"1px solid #E5E7EB", borderRadius:8, padding:"12px 14px" }}>
-                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
-                          <span style={{ fontFamily:"monospace", fontSize:12, color:"#6366F1" }}>{a.id}</span>
-                          <span style={{ fontSize:12, fontWeight:700, padding:"2px 8px", borderRadius:20, background:(STATUS_COLOR[a.status]||"#aaa")+"22", color:STATUS_COLOR[a.status]||"#aaa" }}>{a.status}</span>
-                        </div>
-                        <div style={{ display:"flex", justifyContent:"space-between", fontSize:13 }}>
-                          <span style={{ color:"#6B7280" }}>{a.date} · {a.pay}</span>
-                          <span style={{ fontWeight:700, color:"#1A56DB" }}>{fmt(a.total||0)}</span>
-                        </div>
-                        {(a.mainProducts?.length > 0 || a.sampleProducts?.length > 0) && (
-                          <div style={{ marginTop:6, fontSize:12, color:"#6B7280" }}>
-                            {[...(a.mainProducts||[]).map(p=>`[본품] ${p.name}`), ...(a.sampleProducts||[]).map(p=>`[샘플] ${p.name} ${p.qty}개`)].join(" · ")}
-                          </div>
-                        )}
+          {myAppsLoading
+            ? <div style={{ textAlign:"center", padding:20, color:"#9CA3AF" }}>조회 중...</div>
+            : myApps.length === 0
+              ? <div style={{ textAlign:"center", padding:20, color:"#9CA3AF" }}>신청 내역이 없습니다.</div>
+              : <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                  {myApps.map(a => (
+                    <div key={a.id} style={{ border:`1px solid ${a.status==="반려"?"#FECACA":"#E5E7EB"}`, borderRadius:8, padding:"12px 14px", background: a.status==="반려"?"#FFF5F5":"#fff" }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+                        <span style={{ fontFamily:"monospace", fontSize:12, color:"#6366F1" }}>{a.id}</span>
+                        <span style={{ fontSize:12, fontWeight:700, padding:"2px 8px", borderRadius:20, background:(STATUS_COLOR[a.status]||"#aaa")+"22", color:STATUS_COLOR[a.status]||"#aaa" }}>{a.status}</span>
                       </div>
-                    ))}
-                  </div>
-          )}
+                      <div style={{ display:"flex", justifyContent:"space-between", fontSize:13 }}>
+                        <span style={{ color:"#6B7280" }}>{a.date} · {a.pay}</span>
+                        <span style={{ fontWeight:700, color:"#1A56DB" }}>{fmt(a.total||0)}</span>
+                      </div>
+                      {(a.mainProducts?.length > 0 || a.sampleProducts?.length > 0) && (
+                        <div style={{ marginTop:6, fontSize:12, color:"#6B7280" }}>
+                          {[...(a.mainProducts||[]).map(p=>`[본품] ${p.name}`), ...(a.sampleProducts||[]).map(p=>`[샘플] ${p.name} ${p.qty}개`)].join(" · ")}
+                        </div>
+                      )}
+                      {a.status==="반려" && a.rejectReason && (
+                        <div style={{ marginTop:8, background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:6, padding:"8px 12px", fontSize:12, color:"#DC2626" }}>
+                          <span style={{ fontWeight:700 }}>반려 사유: </span>{a.rejectReason}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+          }
         </div>
       )}
 
@@ -766,8 +767,8 @@ function AdminDash({ onBack, onGoShip, onLogout }) {
   useEffect(() => { const fn = () => loadData(); window.addEventListener("focus", fn); return () => window.removeEventListener("focus", fn); }, [loadData]);
 
   const saveNotice   = async () => { try { await saveNoticeDB(notice); } catch(e) { console.error(e); } setEditNotice(false); };
-  const updateStatus = async (id, status) => { const cur = apps.find(a=>a.id===id); if(!cur)return; try { await updateApplication(id, {status}, cur); } catch(e){ console.error(e); } const u = apps.map(a => a.id===id ? {...a,status} : a); setApps(u); if(selected?.id===id)setSelected(s=>({...s,status})); };
-  const bulkStatus   = async (status) => { if(!checkedIds.size)return; const toUpd=apps.filter(a=>checkedIds.has(a.id)); try { await Promise.all(toUpd.map(a=>updateApplication(a.id,{status},a))); } catch(e){ console.error(e); } const u=apps.map(a=>checkedIds.has(a.id)?{...a,status}:a); setApps(u); setCheckedIds(new Set()); };
+  const updateStatus = async (id, status, reason) => { const cur = apps.find(a=>a.id===id); if(!cur)return; const changes={status,...(status==="반려"&&reason?{rejectReason:reason}:{})}; try { await updateApplication(id, changes, cur); } catch(e){ console.error(e); } const u = apps.map(a => a.id===id ? {...a,...changes} : a); setApps(u); if(selected?.id===id)setSelected(s=>({...s,...changes})); };
+  const bulkStatus   = async (status) => { if(!checkedIds.size)return; let reason=""; if(status==="반려"){ reason=window.prompt("반려 사유를 입력해주세요:")||""; } const changes={status,...(status==="반려"&&reason?{rejectReason:reason}:{})}; const toUpd=apps.filter(a=>checkedIds.has(a.id)); try { await Promise.all(toUpd.map(a=>updateApplication(a.id,changes,a))); } catch(e){ console.error(e); } const u=apps.map(a=>checkedIds.has(a.id)?{...a,...changes}:a); setApps(u); setCheckedIds(new Set()); };
   const confirmPay   = async (id) => { const cur=apps.find(a=>a.id===id); if(!cur)return; try { await updateApplication(id,{status:"출고준비",payConfirmed:true},cur); } catch(e){ console.error(e); } const u=apps.map(a=>a.id===id?{...a,status:"출고준비",payConfirmed:true}:a); setApps(u); if(selected?.id===id)setSelected(s=>({...s,status:"출고준비",payConfirmed:true})); };
   const deleteApp    = async (id) => { if(!window.confirm("삭제할까요?"))return; try { await removeApplication(id); } catch(e){ console.error(e); } const u=apps.filter(a=>a.id!==id); setApps(u); if(selected?.id===id)setSelected(null); };
 
@@ -936,7 +937,7 @@ function AdminDash({ onBack, onGoShip, onLogout }) {
                             </tr>
                             {selected?.id===a.id&&(
                               <tr><td colSpan={10} style={{ padding:0 }}>
-                                <InlineDetail app={selected} onStatusChange={st=>updateStatus(a.id,st)} onPayConfirm={()=>confirmPay(a.id)} onClose={()=>setSelected(null)} />
+                                <InlineDetail app={selected} onStatusChange={(st,reason)=>updateStatus(a.id,st,reason)} onPayConfirm={()=>confirmPay(a.id)} onClose={()=>setSelected(null)} />
                               </td></tr>
                             )}
                           </React.Fragment>
@@ -1016,6 +1017,8 @@ function AdminDash({ onBack, onGoShip, onLogout }) {
    인라인 상세 패널
 ════════════════════════════════════════════════════════ */
 function InlineDetail({ app, onStatusChange, onPayConfirm, onClose }) {
+  const [showRejectInput, setShowRejectInput] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
   const paid = app.payConfirmed || app.status === "출고준비";
   return (
     <div style={{ padding:"16px 20px",borderTop:"2px solid #1A56DB",background:"#F8FAFF" }}>
@@ -1052,10 +1055,26 @@ function InlineDetail({ app, onStatusChange, onPayConfirm, onClose }) {
       <div>
         <div style={{ fontSize:11,color:"#9CA3AF",marginBottom:8 }}>상태 변경</div>
         <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-          {["접수","출고준비","반려"].map(st=>(
+          {["접수","출고준비"].map(st=>(
             <button key={st} style={{ padding:"5px 12px",border:`1.5px solid ${app.status===st?(STATUS_COLOR[st]||"#aaa"):"#E5E7EB"}`,borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",background:app.status===st?(STATUS_COLOR[st]||"#aaa"):"#fff",color:app.status===st?"#fff":(STATUS_COLOR[st]||"#6B7280") }} onClick={()=>onStatusChange(st)}>{st}</button>
           ))}
+          <button style={{ padding:"5px 12px",border:`1.5px solid ${app.status==="반려"?"#DC2626":"#E5E7EB"}`,borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",background:app.status==="반려"?"#DC2626":"#fff",color:app.status==="반려"?"#fff":"#DC2626" }} onClick={()=>setShowRejectInput(v=>!v)}>반려</button>
         </div>
+        {showRejectInput && (
+          <div style={{ marginTop:10,background:"#FEF2F2",border:"1px solid #FECACA",borderRadius:8,padding:"12px 14px" }}>
+            <div style={{ fontSize:12,color:"#DC2626",fontWeight:700,marginBottom:6 }}>✏️ 반려 사유 입력</div>
+            <textarea style={{ ...INP,minHeight:70,resize:"vertical" }} placeholder="반려 사유를 입력해주세요..." value={rejectReason} onChange={e=>setRejectReason(e.target.value)} />
+            <div style={{ display:"flex",gap:8,marginTop:8 }}>
+              <button style={{ padding:"8px 16px",background:"#DC2626",color:"#fff",border:"none",borderRadius:7,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",flex:1 }} onClick={()=>{onStatusChange("반려",rejectReason);setShowRejectInput(false);setRejectReason("");}}>반려 확정</button>
+              <button style={{ padding:"8px 16px",background:"#fff",color:"#374151",border:"1.5px solid #D1D5DB",borderRadius:7,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit" }} onClick={()=>{setShowRejectInput(false);setRejectReason("");}}>취소</button>
+            </div>
+          </div>
+        )}
+        {app.status==="반려" && app.rejectReason && (
+          <div style={{ marginTop:8,background:"#FEF2F2",border:"1px solid #FECACA",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#DC2626" }}>
+            <span style={{ fontWeight:700 }}>반려 사유: </span>{app.rejectReason}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1073,6 +1092,7 @@ function ShipPage({ onBack }) {
   const [filterDate,   setFilterDate]   = useState("");
   const [filterName,   setFilterName]   = useState("");
   const [selectedKey,  setSelectedKey]  = useState(null);
+  const [checkedShipIds, setCheckedShipIds] = useState(new Set());
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -1088,9 +1108,11 @@ function ShipPage({ onBack }) {
   const bulkShip   = async (ids, shipStatus) => { const toUpd=apps.filter(a=>ids.includes(a.id)); try { await Promise.all(toUpd.map(a=>updateApplication(a.id,{shipStatus},a))); } catch(e){ console.error(e); } setApps(apps.map(a=>ids.includes(a.id)?{...a,shipStatus}:a)); };
 
   const exportCSV = () => {
+    const filteredList = groups.flatMap(([k,list])=>list);
+    const toExport = checkedShipIds.size > 0 ? filteredList.filter(a=>checkedShipIds.has(a.id)) : filteredList;
     const headers=["신청번호","이름","부서","신청일자","결제","출고상태","제품구분","제품명","수량"];
     const rows=[];
-    shipApps.forEach(a=>{
+    toExport.forEach(a=>{
       const all=[...(a.mainProducts||[]).map(p=>({...p,type:"본품"})),...(a.sampleProducts||[]).map(p=>({...p,type:"샘플"}))];
       if(!all.length){rows.push({신청번호:a.id,이름:a.name,부서:a.dept||"",신청일자:a.date,결제:a.pay,출고상태:a.shipStatus||"출고예정",제품구분:"",제품명:"",수량:""});}
       else all.forEach((p,i)=>rows.push({신청번호:i===0?a.id:"",이름:i===0?a.name:"",부서:i===0?(a.dept||""):"",신청일자:i===0?a.date:"",결제:i===0?a.pay:"",출고상태:i===0?(a.shipStatus||"출고예정"):"",제품구분:p.type,제품명:p.name,수량:p.qty}));
@@ -1144,7 +1166,8 @@ function ShipPage({ onBack }) {
           <div><div style={{ fontWeight:800,fontSize:18 }}>출고 관리</div><div style={{ fontSize:12,color:"#6B7280" }}>출고준비 신청 기준</div></div>
         </div>
         <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
-          <button style={{ ...BS,background:"#F0FDF4",color:"#059669",borderColor:"#BBF7D0" }} onClick={exportCSV}>📥 CSV</button>
+          <button style={{ ...BS,background:"#F0FDF4",color:"#059669",borderColor:"#BBF7D0" }} onClick={exportCSV}>📥 CSV {checkedShipIds.size > 0 ? `(선택 ${checkedShipIds.size}건)` : `(필터 ${groups.flatMap(([k,list])=>list).length}건)`}</button>
+          {checkedShipIds.size > 0 && <button style={{ ...BS,background:"#FEF2F2",color:"#DC2626",borderColor:"#FECACA" }} onClick={()=>setCheckedShipIds(new Set())}>✕ 선택 해제</button>}
           <button style={BS} onClick={loadData}>🔄 새로고침</button>
           <button style={BO} onClick={onBack}>← 관리자</button>
         </div>
@@ -1185,8 +1208,8 @@ function ShipPage({ onBack }) {
             </div>
             {loading?<div style={{ textAlign:"center",padding:40,color:"#9CA3AF" }}>불러오는 중...</div>
               :groups.length===0?<div style={{ textAlign:"center",padding:40,color:"#9CA3AF" }}>해당 조건의 출고 내역이 없습니다.</div>
-              :<div style={{ display:"flex",gap:12 }}>
-                <div style={{ width:200,flexShrink:0,display:"flex",flexDirection:"column",gap:6 }}>
+              :<div className="ship-panels" style={{ display:"flex",gap:12 }}>
+                <div className="ship-sidebar" style={{ width:200,flexShrink:0,display:"flex",flexDirection:"column",gap:6 }}>
                   {groups.map(([key,list])=>{const allDone=list.every(a=>a.shipStatus==="출고완료"),isSel=selectedKey===key;return(
                     <div key={key} onClick={()=>setSelectedKey(isSel?null:key)}
                       style={{ padding:"10px 12px",borderRadius:8,cursor:"pointer",userSelect:"none",border:`1.5px solid ${isSel?"#1A56DB":allDone?"#BBF7D0":"#E5E7EB"}`,background:isSel?"#EEF3FF":allDone?"#F0FDF4":"#F9FAFB" }}>
@@ -1210,18 +1233,25 @@ function ShipPage({ onBack }) {
                             <button style={{ padding:"7px 16px",border:"none",borderRadius:7,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",background:allDone?"#059669":"#1A56DB",color:"#fff" }} onClick={()=>bulkShip(list.map(a=>a.id),allDone?"출고예정":"출고완료")}>{allDone?"✅ 출고완료":"📦 출고완료로 변경"}</button>
                           </div>
                           <div style={{ padding:"10px 16px" }}><ShipProdTable prods={prods} allDone={allDone} /></div>
-                          {viewMode==="date"&&<div style={{ padding:"6px 16px 12px",borderTop:"1px dashed #E5E7EB" }}>
-                            <div style={{ fontSize:11,color:"#9CA3AF",marginBottom:6,marginTop:6 }}>신청자별 출고 상태</div>
+                          <div style={{ padding:"6px 16px 12px",borderTop:"1px dashed #E5E7EB" }}>
+                            <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6,marginTop:6 }}>
+                              <div style={{ fontSize:11,color:"#9CA3AF" }}>신청자별 출고 상태</div>
+                              <label style={{ display:"flex",alignItems:"center",gap:4,fontSize:11,color:"#6B7280",cursor:"pointer" }}>
+                                <input type="checkbox" style={{ accentColor:"#1A56DB" }} checked={list.length>0&&list.every(a=>checkedShipIds.has(a.id))} onChange={e=>{const n=new Set(checkedShipIds);list.forEach(a=>e.target.checked?n.add(a.id):n.delete(a.id));setCheckedShipIds(n);}} />
+                                전체선택
+                              </label>
+                            </div>
                             <div style={{ display:"flex",flexWrap:"wrap",gap:6 }}>
                               {list.map(a=>(
-                                <div key={a.id} style={{ display:"flex",alignItems:"center",gap:6,background:a.shipStatus==="출고완료"?"#F0FDF4":"#F9FAFB",border:`1px solid ${a.shipStatus==="출고완료"?"#BBF7D0":"#E5E7EB"}`,borderRadius:6,padding:"4px 10px" }}>
+                                <div key={a.id} style={{ display:"flex",alignItems:"center",gap:6,background:checkedShipIds.has(a.id)?"#EEF3FF":a.shipStatus==="출고완료"?"#F0FDF4":"#F9FAFB",border:`1px solid ${checkedShipIds.has(a.id)?"#1A56DB":a.shipStatus==="출고완료"?"#BBF7D0":"#E5E7EB"}`,borderRadius:6,padding:"4px 10px" }}>
+                                  <input type="checkbox" style={{ accentColor:"#1A56DB" }} checked={checkedShipIds.has(a.id)} onChange={e=>{const n=new Set(checkedShipIds);e.target.checked?n.add(a.id):n.delete(a.id);setCheckedShipIds(n);}} />
                                   <span style={{ fontSize:12,fontWeight:700 }}>{a.name}</span>
                                   <span style={{ fontSize:11,color:"#9CA3AF" }}>{a.dept}</span>
                                   <button style={{ fontSize:11,padding:"2px 8px",border:"none",borderRadius:4,cursor:"pointer",fontFamily:"inherit",fontWeight:700,background:a.shipStatus==="출고완료"?"#059669":"#1A56DB",color:"#fff" }} onClick={()=>updateShip(a.id,a.shipStatus==="출고완료"?"출고예정":"출고완료")}>{a.shipStatus==="출고완료"?"완료":"예정"}</button>
                                 </div>
                               ))}
                             </div>
-                          </div>}
+                          </div>
                         </div>
                       );
                     })()}
@@ -1398,7 +1428,7 @@ function EmployeeManager({ employees, onReload }) {
       {/* 직원 추가 폼 */}
       <div style={{ background:"#F9FAFB", border:"1px solid #E5E7EB", borderRadius:10, padding:"16px" }}>
         <div style={{ fontWeight:700, fontSize:14, marginBottom:12 }}>➕ 직원 개별 추가</div>
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr auto", gap:8, alignItems:"end" }}>
+        <div className="emp-add-grid" style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr auto", gap:8, alignItems:"end" }}>
           <SField label="이름" required>
             <input style={INP} placeholder="홍길동" value={form.name} onChange={e => setForm(f=>({...f, name:e.target.value}))} />
           </SField>
