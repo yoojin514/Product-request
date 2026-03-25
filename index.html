@@ -1,0 +1,1312 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>제품 신청 시스템 | 고혼진리퍼블릭</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #F4F5F7; font-family: 'Noto Sans KR', sans-serif; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+
+/* ════════════════════════════════════════════════════════
+   공통 상수
+════════════════════════════════════════════════════════ */
+const MAIN_PRODUCTS = [
+  { id: 1, name: "이노크림",         price: 130000 },
+  { id: 2, name: "플레르코 앰플",    price: 130000 },
+  { id: 3, name: "스킨베이스",       price:  58000 },
+  { id: 4, name: "마일드 선블록",    price:  25600 },
+  { id: 5, name: "데일리 딥 클렌저", price:  15200 },
+];
+const SAMPLE_PRODUCTS = [
+  { id: 101, name: "크림 미니",                            price:  4000, minQty: 1   },
+  { id: 102, name: "앰플 미니",                            price:  5000, minQty: 1   },
+  { id: 103, name: "스킨베이스 미니",                      price:  3000, minQty: 1   },
+  { id: 104, name: "클렌저 미니 (30ml)",                   price:  3300, minQty: 1   },
+  { id: 105, name: "마스크팩 1BOX",                        price: 15000, minQty: 1   },
+  { id: 106, name: "크림 파우치",                          price:   400, minQty: 100 },
+  { id: 107, name: "앰플 파우치",                          price:   500, minQty: 100 },
+  { id: 108, name: "스킨베이스 파우치",                    price:   300, minQty: 100 },
+  { id: 109, name: "선블록 파우치",                        price:   350, minQty: 100 },
+  { id: 110, name: "키트 (팩2ea+크림미니+스킨베이스미니)", price: 10000, minQty: 1   },
+];
+const COMPANY_BANK         = { bank: "국민은행", account: "770601-00-091438", holder: "주식회사 고혼진리퍼블릭" };
+const DEPT_LIST            = ["경영지원","디자인","미디어 컨텐츠","영업부","영업지원","임원","재무회계","해외사업"];
+const SAMPLE_MONTHLY_LIMIT = 200000;
+const ADMIN_ID             = "admin";
+const ADMIN_PW             = "1234";
+const STATUS_COLOR         = { 접수: "#6366F1", 출고준비: "#0891B2", 반려: "#DC2626" };
+
+/* ════════════════════════════════════════════════════════
+   공통 유틸
+════════════════════════════════════════════════════════ */
+const fmt   = (n) => "₩" + Number(n).toLocaleString();
+const today = () => new Date().toISOString().split("T")[0];
+const newId = () => "ORD-" + Date.now().toString().slice(-6);
+
+/* ════════════════════════════════════════════════════════
+   Supabase 클라이언트
+════════════════════════════════════════════════════════ */
+const { createClient } = window.supabase;
+const sb = createClient(
+  'https://vsqfnohvkhgpzdvfmqqv.supabase.co',
+  'sb_publishable_Ln1Ghf2yN6YD8-NRtdXegQ_HEcf9AOR'
+);
+
+async function loadApplications() {
+  const { data, error } = await sb.from('applications').select('data').order('created_at', { ascending: false });
+  if (error) { console.error(error); return []; }
+  return (data || []).map(r => r.data);
+}
+async function addApplication(entry) {
+  const { error } = await sb.from('applications').insert({ id: entry.id, data: entry });
+  if (error) throw error;
+}
+async function updateApplication(id, changes, current) {
+  const updated = { ...current, ...changes };
+  const { error } = await sb.from('applications').update({ data: updated }).eq('id', id);
+  if (error) throw error;
+}
+async function removeApplication(id) {
+  const { error } = await sb.from('applications').delete().eq('id', id);
+  if (error) throw error;
+}
+async function loadNotice() {
+  const { data, error } = await sb.from('settings').select('value').eq('key', 'notice').maybeSingle();
+  if (error) { console.error(error); return null; }
+  return data?.value || null;
+}
+async function saveNoticeDB(noticeData) {
+  const { error } = await sb.from('settings').upsert({ key: 'notice', value: noticeData });
+  if (error) throw error;
+}
+
+function getNthWeekday(y, m, dow, n) {
+  const d = new Date(y, m, 1); let c = 0;
+  while (true) { if (d.getDay() === dow && ++c === n) return new Date(d); d.setDate(d.getDate() + 1); }
+}
+function fmtDate(d) { return `${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일`; }
+function getMainPickup(dateStr) {
+  const b = new Date(dateStr), y = b.getFullYear(), m = b.getMonth();
+  const tue1 = getNthWeekday(y, m, 2, 1);
+  const tm = b <= tue1 ? m : m + 1, ty = tm > 11 ? y + 1 : y;
+  return getNthWeekday(ty, tm % 12, 5, 1);
+}
+function getSampleDeadline(dateStr) {
+  const b = new Date(dateStr), y = b.getFullYear(), m = b.getMonth();
+  if (b <= new Date(y, m, 8)) return `${y}년 ${m+1}월 10일 이후 담당자 안내`;
+  const nm = m + 1, ny = nm > 11 ? y + 1 : y;
+  return `${ny}년 ${nm % 12 + 1}월 10일 이후 담당자 안내`;
+}
+function getRestrictions(apps, name, dept) {
+  const res = {};
+  if (!name || !dept) return res;
+  const ago = new Date(); ago.setMonth(ago.getMonth() - 3);
+  (apps || []).forEach(a => {
+    if (a.name !== name || a.dept !== dept || a.status === "반려") return;
+    if (new Date(a.date) >= ago) {
+      (a.mainProducts || []).forEach(p => {
+        const prod = MAIN_PRODUCTS.find(x => x.name === p.name); if (!prod) return;
+        const avail = new Date(a.date); avail.setMonth(avail.getMonth() + 3);
+        if (!res[prod.id] || avail > new Date(res[prod.id])) res[prod.id] = avail.toISOString().split("T")[0];
+      });
+    }
+  });
+  return res;
+}
+function getSampleUsed(apps, name, dept) {
+  if (!name || !dept) return 0;
+  const now = new Date(); let used = 0;
+  (apps || []).forEach(a => {
+    if (a.name !== name || a.dept !== dept || a.status === "반려") return;
+    const d = new Date(a.date);
+    if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()) used += a.totalSample || 0;
+  });
+  return used;
+}
+
+/* ════════════════════════════════════════════════════════
+   공통 스타일
+════════════════════════════════════════════════════════ */
+const GLOBAL_CSS = `
+  * { box-sizing: border-box; }
+  input, select, textarea, button { font-family: inherit; -webkit-appearance: none; }
+  input[type="checkbox"] { -webkit-appearance: checkbox; }
+  input[type="date"]     { -webkit-appearance: none; }
+  body { margin: 0; padding: 0; background: #F4F5F7; }
+  @media (max-width: 600px) {
+    .pay-grid { grid-template-columns: 1fr !important; }
+    .action-bar { flex-direction: column !important; gap: 12px !important; align-items: stretch !important; }
+    .action-btns { flex-direction: column !important; }
+    .action-btns button { width: 100% !important; }
+    .rule-row { flex-direction: column !important; }
+    .rule-div  { width: 100% !important; height: 1px !important; margin: 10px 0 !important; }
+    .stat-grid { grid-template-columns: 1fr 1fr !important; }
+    .detail-grid { grid-template-columns: 1fr !important; }
+  }
+`;
+const FF = "'Noto Sans KR','Apple SD Gothic Neo',sans-serif";
+const INP  = { width:"100%", padding:"10px 13px", border:"1.5px solid #D1D5DB", borderRadius:8, fontSize:16, fontFamily:"inherit", outline:"none", color:"#111", background:"#fff", boxSizing:"border-box" };
+const BINP = (err) => ({ ...INP, ...(err ? { borderColor:"#DC2626" } : {}) });
+const BP   = { padding:"12px 22px", background:"#1A56DB", color:"#fff", border:"none", borderRadius:8, fontWeight:700, fontSize:15, cursor:"pointer", fontFamily:"inherit", touchAction:"manipulation" };
+const BO   = { padding:"10px 16px", background:"#fff", color:"#374151", border:"1.5px solid #D1D5DB", borderRadius:8, fontWeight:600, fontSize:13, cursor:"pointer", fontFamily:"inherit" };
+const BS   = { padding:"6px 12px", border:"1.5px solid #E5E7EB", borderRadius:6, fontSize:12, fontWeight:600, cursor:"pointer", background:"#fff", color:"#374151", fontFamily:"inherit" };
+const BT   = { padding:"4px 9px", border:"1.5px solid #E5E7EB", borderRadius:5, fontSize:11, cursor:"pointer", background:"#fff", color:"#6B7280", fontFamily:"inherit" };
+const FB   = { padding:"5px 11px", border:"1.5px solid #E5E7EB", borderRadius:20, fontSize:12, fontWeight:600, cursor:"pointer", background:"#fff", color:"#374151", fontFamily:"inherit" };
+const FBA  = { background:"#1A56DB", color:"#fff", borderColor:"#1A56DB" };
+const TH   = { padding:"8px 10px", textAlign:"left", fontSize:11, fontWeight:700, color:"#6B7280", borderBottom:"1px solid #E5E7EB" };
+const TD   = { padding:"10px", borderBottom:"1px solid #F3F4F6", fontSize:13 };
+const CARD = { background:"#fff", border:"1px solid #E5E7EB", borderRadius:12, padding:"20px 16px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" };
+
+/* ════════════════════════════════════════════════════════
+   신청 페이지
+════════════════════════════════════════════════════════ */
+function EmployeePage({ notice, onAdmin }) {
+  const makeForm = () => ({
+    name: "", dept: "", date: today(), pay: "",
+    cardCompany: "", cardNumber: "", cardExpiry: "",
+    mainItems:   MAIN_PRODUCTS.map(p => ({ id: p.id, checked: false })),
+    sampleItems: SAMPLE_PRODUCTS.map(p => ({ id: p.id, checked: false, qty: p.minQty })),
+  });
+
+  const [form,        setForm]        = useState(makeForm());
+  const [errors,      setErrors]      = useState({});
+  const [submitted,   setSubmitted]   = useState(null);
+  const [tab,         setTab]         = useState("main");
+  const [restrictions,setRestrictions]= useState({});
+  const [sampleUsed,  setSampleUsed]  = useState(0);
+  const [blockMsg,    setBlockMsg]    = useState("");
+  const [submitting,  setSubmitting]  = useState(false);
+  const debRef = useRef(null);
+
+  // 구매 이력 조회
+  useEffect(() => {
+    clearTimeout(debRef.current);
+    if (!form.name.trim() || !form.dept) { setRestrictions({}); setSampleUsed(0); return; }
+    debRef.current = setTimeout(async () => {
+      const apps = await loadApplications();
+      setRestrictions(getRestrictions(apps, form.name.trim(), form.dept));
+      setSampleUsed(getSampleUsed(apps, form.name.trim(), form.dept));
+    }, 400);
+  }, [form.name, form.dept]);
+
+  // 샘플 선택 시 카드결제 해제
+  useEffect(() => {
+    if (form.sampleItems.some(it => it.checked) && form.pay === "카드결제")
+      setForm(f => ({ ...f, pay: "무통장입금" }));
+  }, [form.sampleItems]);
+
+  // 합계
+  const mainBase  = form.mainItems.reduce((s, it) => { if (!it.checked) return s; const p = MAIN_PRODUCTS.find(x => x.id === it.id); return s + (p ? p.price : 0); }, 0);
+  const mainVat   = form.pay === "카드결제" ? Math.round(mainBase * 0.1) : 0;
+  const mainCount = form.mainItems.filter(it => it.checked).length;
+  const sampleTotal = form.sampleItems.reduce((s, it) => { if (!it.checked) return s; const p = SAMPLE_PRODUCTS.find(x => x.id === it.id); return s + (p ? p.price * (Number(it.qty) || p.minQty) : 0); }, 0);
+  const sampleCount = form.sampleItems.filter(it => it.checked).length;
+  const sampleRemain = Math.max(0, SAMPLE_MONTHLY_LIMIT - sampleUsed - sampleTotal);
+
+  const toggleMain = (id) => {
+    if (restrictions[id]) return;
+    setForm(f => ({ ...f, mainItems: f.mainItems.map(it => it.id === id ? { ...it, checked: !it.checked } : it) }));
+  };
+  const toggleSample = (id) => {
+    const p = SAMPLE_PRODUCTS.find(x => x.id === id);
+    const it = form.sampleItems.find(x => x.id === id);
+    if (!it.checked) {
+      const addAmt = p.price * (p.minQty || 1);
+      if (sampleUsed + sampleTotal + addAmt > SAMPLE_MONTHLY_LIMIT) {
+        const remain = SAMPLE_MONTHLY_LIMIT - sampleUsed - sampleTotal;
+        setBlockMsg(remain <= 0 ? "이번 달 샘플 한도(₩200,000)를 모두 사용했습니다."
+          : `"${p.name}" 추가 시 한도 초과. (잔여 ${fmt(remain)} / 필요 ${fmt(addAmt)})`);
+        setTimeout(() => setBlockMsg(""), 4000);
+        return;
+      }
+    }
+    setBlockMsg("");
+    setForm(f => ({ ...f, sampleItems: f.sampleItems.map(it => it.id === id ? { ...it, checked: !it.checked } : it) }));
+  };
+  const changeSampleQty = (id, val) => {
+    const p = SAMPLE_PRODUCTS.find(x => x.id === id);
+    const newQty = Number(val) || p.minQty;
+    const others = form.sampleItems.reduce((s, it) => { if (!it.checked || it.id === id) return s; const pr = SAMPLE_PRODUCTS.find(x => x.id === it.id); return s + (pr ? pr.price * (Number(it.qty) || pr.minQty) : 0); }, 0);
+    if (sampleUsed + others + p.price * newQty > SAMPLE_MONTHLY_LIMIT) {
+      const remain = SAMPLE_MONTHLY_LIMIT - sampleUsed - others;
+      const maxQty = Math.max(p.minQty, Math.floor(remain / p.price));
+      const capped = p.minQty >= 100 ? (Math.floor(maxQty / 100) * 100 || p.minQty) : maxQty;
+      setBlockMsg(`"${p.name}" 수량이 한도 초과로 ${capped}개로 조정됐습니다.`);
+      setTimeout(() => setBlockMsg(""), 4000);
+      setForm(f => ({ ...f, sampleItems: f.sampleItems.map(it => it.id === id ? { ...it, qty: capped } : it) }));
+      return;
+    }
+    setForm(f => ({ ...f, sampleItems: f.sampleItems.map(it => it.id === id ? { ...it, qty: newQty } : it) }));
+  };
+
+  const handleSubmit = () => {
+    const e = {};
+    if (!form.name.trim()) e.name = "이름을 입력해주세요";
+    if (!form.dept)        e.dept = "부서를 선택해주세요";
+    if (!form.pay)         e.pay  = "결제 방법을 선택해주세요";
+    if (!form.mainItems.some(it => it.checked) && !form.sampleItems.some(it => it.checked))
+      e.items = "본품 또는 샘플 중 하나 이상 선택해주세요";
+    if (form.pay === "카드결제") {
+      if (!form.cardCompany)                  e.cardCompany = "카드사를 선택해주세요";
+      if (!form.cardNumber.replace(/\s/g,"")) e.cardNumber  = "카드번호를 입력해주세요";
+      if (!form.cardExpiry)                   e.cardExpiry  = "유효기간을 입력해주세요";
+    }
+    if (sampleUsed + sampleTotal > SAMPLE_MONTHLY_LIMIT)
+      e.sampleLimit = `샘플 합계(${fmt(sampleTotal)})가 잔여 한도(${fmt(SAMPLE_MONTHLY_LIMIT - sampleUsed)})를 초과합니다.`;
+    setErrors(e);
+    if (Object.keys(e).length > 0) return;
+
+    const entry = {
+      id: newId(), submittedAt: new Date().toLocaleString("ko-KR"),
+      name: form.name.trim(), dept: form.dept, date: form.date, pay: form.pay,
+      cardCompany: form.pay === "카드결제" ? form.cardCompany : "",
+      cardNumber:  form.pay === "카드결제" ? form.cardNumber  : "",
+      cardExpiry:  form.pay === "카드결제" ? form.cardExpiry  : "",
+      mainProducts: form.mainItems.filter(it => it.checked).map(it => {
+        const p = MAIN_PRODUCTS.find(x => x.id === it.id);
+        return { name: p.name, price: p.price, qty: 1 };
+      }),
+      sampleProducts: form.sampleItems.filter(it => it.checked).map(it => {
+        const p = SAMPLE_PRODUCTS.find(x => x.id === it.id);
+        return { name: p.name, price: p.price, qty: Number(it.qty) || p.minQty, minQty: p.minQty };
+      }),
+      totalMain:   mainBase + mainVat,
+      totalSample: sampleTotal,
+      total:       mainBase + mainVat + sampleTotal,
+      status: "접수",
+    };
+    setSubmitting(true);
+    try {
+      await addApplication(entry);
+      setSubmitted(entry);
+    } catch(err) {
+      console.error(err);
+      alert("신청 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // 완료 화면
+  if (submitted) {
+    const hm = submitted.mainProducts.length > 0;
+    const hs = submitted.sampleProducts.length > 0;
+    return (
+      <div style={{ fontFamily: FF, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#F4F5F7", padding: 16 }}>
+        <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 16, padding: "36px 24px", maxWidth: 460, width: "100%", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 14, boxShadow: "0 4px 20px rgba(0,0,0,0.07)" }}>
+          <div style={{ fontSize: 44 }}>✅</div>
+          <h2 style={{ fontSize: 20, fontWeight: 800, margin: 0 }}>신청이 완료되었습니다</h2>
+          <div style={{ width: "100%", background: "#EEF3FF", border: "1.5px solid #C7D7FB", borderRadius: 10, padding: "14px 16px" }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: "#1A56DB", marginBottom: 8 }}>📅 예상 수령일 안내</div>
+            {hm && (() => {
+              const b = new Date(submitted.date), y = b.getFullYear(), m = b.getMonth();
+              const tue1 = getNthWeekday(y, m, 2, 1);
+              const isNextMonth = b > tue1;
+              const pickupDate = getMainPickup(submitted.date);
+              return (
+                <div style={{ marginBottom: 4 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                    <span>📦 본품 수령 예정일</span>
+                    <span style={{ fontWeight: 700 }}>{fmtDate(pickupDate)}</span>
+                  </div>
+                  {isNextMonth && (
+                    <div style={{ fontSize: 11, color: "#F59E0B", marginTop: 3 }}>
+                      ⚠️ 첫째주 화요일 마감 이후 신청으로 <b>익월</b> 수령됩니다.
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+            {hs && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+              <span>🧪 샘플 수령 예정</span>
+              <span style={{ fontWeight: 700, color: "#059669" }}>{getSampleDeadline(submitted.date)}</span>
+            </div>}
+          </div>
+          <div style={{ width: "100%", background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "12px 16px", textAlign: "left" }}>
+            {[
+              ["신청번호", submitted.id],
+              ["신청자",   `${submitted.name} / ${submitted.dept}`],
+              ["신청일",   submitted.date],
+              ...submitted.mainProducts.map(p  => [`[본품] ${p.name}`,  "1개"]),
+              ...submitted.sampleProducts.map(p => [`[샘플] ${p.name}`, `${p.qty}${p.minQty >= 100 ? "장" : "개"}`]),
+              ["결제", submitted.pay + (submitted.cardCompany ? ` (${submitted.cardCompany})` : "")],
+              ["합계", fmt(submitted.total)],
+            ].map(([l, v], i, arr) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px dashed #E5E7EB" }}>
+                <span style={{ color: "#6B7280", fontSize: 13 }}>{l}</span>
+                <span style={{ fontWeight: 600, fontSize: 13, fontFamily: "monospace", color: i === arr.length - 1 ? "#1A56DB" : "#111" }}>{v}</span>
+              </div>
+            ))}
+          </div>
+          <button style={BP} onClick={() => { setForm(makeForm()); setSubmitted(null); setErrors({}); setBlockMsg(""); }}>새 신청서 작성</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ fontFamily: FF, maxWidth: 720, margin: "0 auto", padding: "24px 14px 60px", display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* 관리자 버튼 */}
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <button style={{ ...BS, padding: "8px 14px" }} onClick={onAdmin}>⚙️ 관리자 페이지</button>
+      </div>
+
+      {/* 공지사항 */}
+      <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 12, overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+        <div style={{ height: 6, background: "linear-gradient(90deg,#1A56DB,#6366F1)" }} />
+        <div style={{ padding: "20px 18px" }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#1A56DB", marginBottom: 6 }}>📢 공지사항</div>
+          <h1 style={{ fontSize: 20, fontWeight: 800, color: "#111", margin: "0 0 8px" }}>{notice.title || "제품 신청 안내"}</h1>
+          <p style={{ fontSize: 14, color: "#6B7280", lineHeight: 1.7, margin: 0, whiteSpace: "pre-line" }}>{notice.body || ""}</p>
+          {notice.deadline && <div style={{ marginTop: 10, display: "inline-block", background: "#EEF3FF", color: "#1A56DB", padding: "5px 12px", borderRadius: 20, fontSize: 13, fontWeight: 600 }}>📅 마감일: {notice.deadline}</div>}
+        </div>
+      </div>
+
+      {/* 안내 규칙 */}
+      <div style={CARD}>
+        <div className="rule-row" style={{ display: "flex" }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>📦 본품 안내</div>
+            {["제품별 3개월에 1개씩","카드결제 시 부가세 10% 추가","주문 마감: 매달 첫째주 화요일","결제: 첫째주 화요일 15:30","수령: 매달 첫째주 금요일"].map(t => <div key={t} style={{ fontSize: 12, color: "#6B7280", lineHeight: 1.8 }}>• {t}</div>)}
+          </div>
+          <div className="rule-div" style={{ width: 1, background: "#E5E7EB", margin: "0 16px" }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>🧪 샘플 안내</div>
+            {["월 20만원 한도 / 달에 1번","무통장 입금으로만 구매","파우치는 100장 단위","주문 마감: 매달 10일 전 영업일","결제: 매달 10일 15:30"].map(t => <div key={t} style={{ fontSize: 12, color: "#6B7280", lineHeight: 1.8 }}>• {t}</div>)}
+          </div>
+        </div>
+      </div>
+
+      {/* 신청자 정보 */}
+      <div style={CARD}>
+        <SLabel>신청자 정보</SLabel>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+          <SField label="이름" required error={errors.name}>
+            <input style={BINP(errors.name)} placeholder="홍길동" value={form.name}
+              onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+          </SField>
+          <SField label="부서" required error={errors.dept}>
+            <select style={{ ...BINP(errors.dept), color: form.dept ? "#111" : "#9CA3AF" }}
+              value={form.dept} onChange={e => setForm(f => ({ ...f, dept: e.target.value }))}>
+              <option value="" disabled>부서 선택</option>
+              {DEPT_LIST.map(d => <option key={d} value={d} style={{ color: "#111" }}>{d}</option>)}
+            </select>
+          </SField>
+          <div style={{ gridColumn: "span 2" }}>
+            <SField label="신청일자">
+              <input type="date" style={INP} value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
+            </SField>
+          </div>
+        </div>
+      </div>
+
+      {/* 제품 선택 */}
+      <div style={CARD}>
+        <SLabel>{tab === "main" ? "제품 선택 (본품: 제품별 1개 고정)" : "제품 선택 및 수량"}</SLabel>
+        {errors.items && <SErrMsg>{errors.items}</SErrMsg>}
+        {errors.sampleLimit && tab === "sample" && <SErrMsg>{errors.sampleLimit}</SErrMsg>}
+        {/* 탭 */}
+        <div style={{ display: "flex", borderBottom: "1px solid #E5E7EB", marginBottom: 8 }}>
+          {[["main","📦 본품"],["sample","🧪 샘플"]].map(([k, l]) => (
+            <button key={k} onClick={() => setTab(k)} style={{ padding: "9px 16px", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: tab === k ? 700 : 500, fontSize: 14, color: tab === k ? "#1A56DB" : "#6B7280", borderBottom: tab === k ? "2px solid #1A56DB" : "2px solid transparent", background: "transparent" }}>
+              {l}
+              {k === "main"   && mainCount   > 0 && <span style={{ background: "#1A56DB", color: "#fff", borderRadius: 20, fontSize: 11, fontWeight: 700, padding: "1px 7px", marginLeft: 4 }}>{mainCount}</span>}
+              {k === "sample" && sampleCount > 0 && <span style={{ background: "#059669", color: "#fff", borderRadius: 20, fontSize: 11, fontWeight: 700, padding: "1px 7px", marginLeft: 4 }}>{sampleCount}</span>}
+            </button>
+          ))}
+        </div>
+
+        {/* 안내 배너 */}
+        {tab === "sample" && blockMsg && <div style={{ margin: "4px 0 8px", padding: "10px 14px", background: "#FEF2F2", border: "1.5px solid #FECACA", borderRadius: 8, fontSize: 13, color: "#DC2626", fontWeight: 600 }}>🚫 {blockMsg}</div>}
+        {tab === "main" && Object.keys(restrictions).length > 0 && <div style={{ margin: "4px 0 8px", padding: "8px 12px", background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 6, fontSize: 12, color: "#92400E" }}>🔒 회색 제품은 3개월 이내 구매 이력으로 선택이 제한됩니다.</div>}
+        {tab === "main" && form.pay === "카드결제" && mainCount > 0 && <div style={{ margin: "4px 0 8px", padding: "8px 12px", background: "#EEF3FF", border: "1px solid #C7D7FB", borderRadius: 6, fontSize: 12, color: "#1A56DB" }}>💳 카드결제 시 부가세 10% 추가됩니다.</div>}
+        {tab === "sample" && form.name.trim() && form.dept && (
+          <div style={{ margin: "4px 0 8px", padding: "10px 14px", background: sampleRemain === 0 ? "#FEF2F2" : "#F0FDF4", border: `1px solid ${sampleRemain === 0 ? "#FECACA" : "#BBF7D0"}`, borderRadius: 6, fontSize: 12, color: sampleRemain === 0 ? "#DC2626" : "#166534" }}>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span style={{ fontWeight: 700 }}>{sampleRemain === 0 ? "🚫 한도 초과" : "💰 이번 달 잔여 한도"}</span>
+              <span style={{ fontFamily: "monospace", fontWeight: 800 }}>{fmt(sampleRemain)} / ₩200,000</span>
+            </div>
+            {sampleUsed > 0 && <div style={{ marginTop: 3, opacity: 0.8 }}>기존 신청: {fmt(sampleUsed)} · 현재 선택: {fmt(sampleTotal)}</div>}
+          </div>
+        )}
+
+        {/* 제품 목록 */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+          {(tab === "main" ? MAIN_PRODUCTS : SAMPLE_PRODUCTS).map(p => {
+            const it = (tab === "main" ? form.mainItems : form.sampleItems).find(x => x.id === p.id);
+            const locked   = tab === "main" && !!restrictions[p.id];
+            const exceed   = tab === "sample" && !it.checked && (sampleUsed + sampleTotal + p.price * (p.minQty || 1) > SAMPLE_MONTHLY_LIMIT);
+            const disabled = locked || (exceed && !it.checked);
+            const accent   = tab === "sample" ? "#059669" : "#1A56DB";
+            const accentBg = tab === "sample" ? "#F0FDF4"  : "#EEF3FF";
+            const sub      = it.checked ? (tab === "main" ? p.price : p.price * (Number(it.qty) || p.minQty)) : 0;
+            return (
+              <div key={p.id}
+                onClick={() => disabled ? null : (tab === "main" ? toggleMain(p.id) : toggleSample(p.id))}
+                style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 12px", border: `1.5px solid ${it.checked ? accent : "#E5E7EB"}`, borderRadius: 8, cursor: disabled ? "not-allowed" : "pointer", background: it.checked ? accentBg : disabled ? "#F9FAFB" : "#fff", opacity: disabled ? 0.6 : 1, userSelect: "none" }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: disabled ? "#9CA3AF" : "#111", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    {p.name}
+                    {p.minQty >= 100 && <span style={{ fontSize: 10, background: "#F3F4F6", color: "#6B7280", padding: "1px 6px", borderRadius: 20 }}>100장 단위</span>}
+                    {locked  && <span style={{ fontSize: 10, background: "#FEE2E2", color: "#DC2626", padding: "1px 6px", borderRadius: 20, fontWeight: 700 }}>🔒 구매 제한</span>}
+                    {exceed  && <span style={{ fontSize: 10, background: "#FEE2E2", color: "#DC2626", padding: "1px 6px", borderRadius: 20, fontWeight: 700 }}>🚫 한도 초과</span>}
+                  </div>
+                  {locked && <div style={{ fontSize: 11, color: "#F87171", marginTop: 2 }}>{(() => { const d = new Date(restrictions[p.id]); return `${d.getFullYear()}. ${d.getMonth()+1}. ${d.getDate()}. 부터 신청 가능`; })()}</div>}
+                </div>
+                <div style={{ textAlign: "right", minWidth: 50, flexShrink: 0 }}>
+                  {it.checked && <div style={{ fontSize: 12, color: accent, fontWeight: 700 }}>선택됨</div>}
+                </div>
+                {tab === "main" ? (
+                  <div style={{ width: 52, height: 34, border: `1.5px solid ${it.checked ? accent : "#E5E7EB"}`, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontFamily: "monospace", fontWeight: 700, color: it.checked ? accent : "#D1D5DB", background: "#fff", flexShrink: 0 }}>1개</div>
+                ) : (
+                  <input type="number" min={p.minQty || 1} max={999} step={p.minQty >= 100 ? 100 : 1}
+                    value={it.qty} disabled={!it.checked}
+                    onClick={e => e.stopPropagation()}
+                    onChange={e => { e.stopPropagation(); changeSampleQty(p.id, e.target.value); }}
+                    style={{ width: 64, padding: "7px 8px", border: `1.5px solid ${it.checked ? accent : "#D1D5DB"}`, borderRadius: 6, textAlign: "right", fontSize: 13, fontFamily: "monospace", outline: "none", opacity: it.checked ? 1 : 0.3, flexShrink: 0 }} />
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* 선택 요약 바 */}
+        {(tab === "main" ? mainCount : sampleCount) > 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#F0F4FF", border: "1px solid #C7D7FB", borderRadius: 8, padding: "12px 14px", marginTop: 12 }}>
+            <span style={{ fontSize: 13, color: "#1A56DB", fontWeight: 700 }}>
+              {tab === "main" ? `📦 본품 ${mainCount}종 선택됨` : `🧪 샘플 ${sampleCount}종 선택됨`}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* 결제 방법 */}
+      <div style={CARD}>
+        <SLabel>결제 방법</SLabel>
+        {errors.pay && <SErrMsg>{errors.pay}</SErrMsg>}
+        {form.sampleItems.some(it => it.checked) && <div style={{ background: "#F0F9FF", border: "1px solid #BAE6FD", borderRadius: 7, padding: "10px 14px", fontSize: 13, color: "#0369A1", marginBottom: 12 }}>🧪 샘플은 <b>무통장 입금으로만</b> 구매 가능합니다.</div>}
+        <div className="pay-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          {[["🏦","무통장입금","계좌이체"],["💳","카드결제","본품 전용 · 부가세 10% 추가"]].map(([icon, label, sub]) => {
+            const blocked = label === "카드결제" && form.sampleItems.some(it => it.checked);
+            return (
+              <div key={label}
+                onClick={() => !blocked && setForm(f => ({ ...f, pay: label }))}
+                style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px", border: `1.5px solid ${form.pay === label && !blocked ? "#1A56DB" : "#E5E7EB"}`, borderRadius: 8, cursor: blocked ? "not-allowed" : "pointer", background: form.pay === label && !blocked ? "#EEF3FF" : blocked ? "#F9FAFB" : "#fff", opacity: blocked ? 0.6 : 1 }}>
+                <span style={{ fontSize: 22 }}>{icon}</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{label}</div>
+                  <div style={{ fontSize: 12, color: "#6B7280" }}>{blocked ? "샘플 선택 시 사용 불가" : sub}</div>
+                </div>
+                {form.pay === label && !blocked && <span style={{ color: "#1A56DB", fontSize: 18, fontWeight: 700 }}>✓</span>}
+              </div>
+            );
+          })}
+        </div>
+        {form.pay === "무통장입금" && (
+          <div style={{ marginTop: 14, padding: "16px", background: "#F0F4FF", border: "1.5px solid #C7D7FB", borderRadius: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#1A56DB", marginBottom: 10 }}>🏦 입금 계좌 정보</div>
+            {/* 은행 */}
+            <div style={{ display: "flex", justifyContent: "space-between", background: "#fff", border: "1px solid #C7D7FB", borderRadius: 7, padding: "10px 13px", marginBottom: 6 }}>
+              <span style={{ fontSize: 12, color: "#6B7280", fontWeight: 600 }}>은행</span>
+              <span style={{ fontSize: 14, fontWeight: 700 }}>{COMPANY_BANK.bank}</span>
+            </div>
+            {/* 계좌번호 + 복사 버튼 */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#fff", border: "1px solid #C7D7FB", borderRadius: 7, padding: "10px 13px", marginBottom: 6 }}>
+              <span style={{ fontSize: 12, color: "#6B7280", fontWeight: 600 }}>계좌번호</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 15, fontWeight: 800, color: "#1A56DB", fontFamily: "monospace" }}>{COMPANY_BANK.account}</span>
+                <CopyBtn text={COMPANY_BANK.account} />
+              </div>
+            </div>
+            {/* 예금주 */}
+            <div style={{ display: "flex", justifyContent: "space-between", background: "#fff", border: "1px solid #C7D7FB", borderRadius: 7, padding: "10px 13px", marginBottom: 10 }}>
+              <span style={{ fontSize: 12, color: "#6B7280", fontWeight: 600 }}>예금주</span>
+              <span style={{ fontSize: 14, fontWeight: 700 }}>{COMPANY_BANK.holder}</span>
+            </div>
+            <div style={{ fontSize: 12, color: "#1A56DB", opacity: 0.8, marginBottom: 8 }}>📌 위 계좌로 입금 후 신청서를 제출해주세요.</div>
+            {(mainCount > 0 || sampleCount > 0) && (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#1A56DB", borderRadius: 8, padding: "12px 16px" }}>
+                <span style={{ fontSize: 14, color: "#fff", fontWeight: 700 }}>💳 입금하실 금액</span>
+                <span style={{ fontFamily: "monospace", fontWeight: 800, fontSize: 20, color: "#fff" }}>{fmt(mainBase + mainVat + sampleTotal)}</span>
+              </div>
+            )}
+          </div>
+        )}
+        {form.pay === "카드결제" && (
+          <div style={{ marginTop: 14, padding: "16px", background: "#F5F3FF", border: "1.5px solid #DDD6FE", borderRadius: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#6366F1", marginBottom: 12 }}>💳 카드 정보 입력</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <SField label="카드사" required error={errors.cardCompany}>
+                <select style={{ ...BINP(errors.cardCompany), color: form.cardCompany ? "#111" : "#9CA3AF" }}
+                  value={form.cardCompany} onChange={e => setForm(f => ({ ...f, cardCompany: e.target.value }))}>
+                  <option value="" disabled>카드사 선택</option>
+                  {["신한카드","삼성카드","현대카드","KB국민카드","롯데카드","하나카드","우리카드","비씨카드","NH농협카드","씨티카드","기타"].map(v => (
+                    <option key={v} value={v} style={{ color: "#111" }}>{v}</option>
+                  ))}
+                </select>
+              </SField>
+              <SField label="카드번호" required error={errors.cardNumber}>
+                <input style={{ ...BINP(errors.cardNumber), fontFamily: "monospace" }}
+                  placeholder="0000 0000 0000 0000" value={form.cardNumber} maxLength={19}
+                  onChange={e => { const r = e.target.value.replace(/\D/g,"").slice(0,16); setForm(f => ({ ...f, cardNumber: r.replace(/(.{4})/g,"$1 ").trim() })); }} />
+              </SField>
+              <SField label="유효기간 (MM/YY)" required error={errors.cardExpiry}>
+                <input style={{ ...BINP(errors.cardExpiry), fontFamily: "monospace" }}
+                  placeholder="MM/YY" value={form.cardExpiry} maxLength={5}
+                  onChange={e => { const r = e.target.value.replace(/\D/g,"").slice(0,4); setForm(f => ({ ...f, cardExpiry: r.length > 2 ? r.slice(0,2)+"/"+r.slice(2) : r })); }} />
+              </SField>
+            </div>
+            {mainCount > 0 && (
+              <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center", background: "#6366F1", borderRadius: 8, padding: "12px 16px" }}>
+                <span style={{ fontSize: 14, color: "#fff", fontWeight: 700 }}>💳 카드 결제 예정 금액</span>
+                <span style={{ fontFamily: "monospace", fontWeight: 800, fontSize: 20, color: "#fff" }}>{fmt(mainBase + mainVat)}</span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* 제출 */}
+      <div className="action-bar" style={{ display: "flex", flexDirection: "row", justifyContent: "space-between", alignItems: "center", background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 10, padding: "16px" }}>
+        <span style={{ fontSize: 12, color: "#9CA3AF" }}><span style={{ color: "#DC2626" }}>*</span> 필수 항목</span>
+        <div className="action-btns" style={{ display: "flex", gap: 10 }}>
+          <button style={BO} onClick={() => { setForm(makeForm()); setErrors({}); setBlockMsg(""); setTab("main"); }}>초기화</button>
+          <button style={{ ...BP, display:"flex", alignItems:"center", gap:8, opacity: submitting ? 0.7 : 1 }} onClick={handleSubmit} disabled={submitting}>
+            <span>{submitting ? "신청 중..." : "신청서 제출"}</span>
+            {(mainCount > 0 || sampleCount > 0) && (
+              <span style={{ background:"rgba(255,255,255,0.25)", borderRadius:20, fontSize:12, padding:"2px 8px", fontWeight:700 }}>
+                {[mainCount>0&&`본품 ${mainCount}종`, sampleCount>0&&`샘플 ${sampleCount}종`].filter(Boolean).join(" + ")}
+              </span>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════
+   관리자 로그인
+════════════════════════════════════════════════════════ */
+function AdminLogin({ onLogin }) {
+  const [id,   setId]   = useState(() => localStorage.getItem("admin_id") || "");
+  const [pw,   setPw]   = useState("");
+  const [err,  setErr]  = useState("");
+  const [auto, setAuto] = useState(() => localStorage.getItem("admin_auto") === "true");
+
+  useEffect(() => {
+    if (localStorage.getItem("admin_auto") === "true") {
+      const sid = localStorage.getItem("admin_id") || "";
+      const spw = localStorage.getItem("admin_pw") || "";
+      if (sid === ADMIN_ID && spw === ADMIN_PW) onLogin();
+    }
+  }, []);
+
+  const handle = () => {
+    if (id === ADMIN_ID && pw === ADMIN_PW) {
+      if (auto) { localStorage.setItem("admin_auto","true"); localStorage.setItem("admin_id",id); localStorage.setItem("admin_pw",pw); }
+      else { localStorage.removeItem("admin_auto"); localStorage.removeItem("admin_pw"); }
+      onLogin();
+    } else { setErr("아이디 또는 비밀번호가 올바르지 않습니다."); setPw(""); }
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#F4F5F7", fontFamily: FF, padding: 16 }}>
+      <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 16, padding: "44px 32px", width: "100%", maxWidth: 380, boxShadow: "0 4px 20px rgba(0,0,0,0.08)", display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ width: 50, height: 50, background: "#111827", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, margin: "0 auto 14px" }}>⚙️</div>
+          <div style={{ fontWeight: 800, fontSize: 20 }}>관리자 로그인</div>
+          <div style={{ fontSize: 13, color: "#9CA3AF", marginTop: 4 }}>제품 신청 관리 시스템</div>
+        </div>
+        <input style={INP} placeholder="아이디" value={id} onChange={e => setId(e.target.value)} onKeyDown={e => e.key==="Enter" && handle()} />
+        <input type="password" style={INP} placeholder="비밀번호" value={pw} onChange={e => setPw(e.target.value)} onKeyDown={e => e.key==="Enter" && handle()} />
+        {err && <div style={{ fontSize: 13, color: "#DC2626", background: "#FEF2F2", padding: "8px 12px", borderRadius: 6 }}>{err}</div>}
+        <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", userSelect: "none" }} onClick={() => setAuto(v => !v)}>
+          <div style={{ width: 20, height: 20, borderRadius: 5, border: `2px solid ${auto ? "#1A56DB" : "#D1D5DB"}`, background: auto ? "#1A56DB" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            {auto && <span style={{ color: "#fff", fontSize: 12, fontWeight: 700 }}>✓</span>}
+          </div>
+          <span style={{ fontSize: 13 }}>자동 로그인</span>
+        </label>
+        <button style={{ ...BP, padding: "13px", width: "100%", fontSize: 15 }} onClick={handle}>로그인</button>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════
+   관리자 대시보드
+════════════════════════════════════════════════════════ */
+function AdminDash({ onBack, onGoShip, onLogout }) {
+  const [apps,         setApps]         = useState([]);
+  const [notice,       setNotice]       = useState({ title: "", body: "", deadline: "" });
+  const [loading,      setLoading]      = useState(true);
+  const [tab,          setTab]          = useState("list");
+  const [statusFilter, setStatusFilter] = useState("전체");
+  const [typeFilter,   setTypeFilter]   = useState("전체");
+  const [selected,     setSelected]     = useState(null);
+  const [checkedIds,   setCheckedIds]   = useState(new Set());
+  const [editNotice,   setEditNotice]   = useState(false);
+  const [statRange,    setStatRange]    = useState("daily");
+  const [statSubTab,   setStatSubTab]   = useState("prod");
+  const [useCustom,    setUseCustom]    = useState(false);
+  const [dateFrom,     setDateFrom]     = useState("");
+  const [dateTo,       setDateTo]       = useState("");
+  const [personSearch, setPersonSearch] = useState("");
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [a, n] = await Promise.all([loadApplications(), loadNotice()]);
+      setApps(a || []);
+      setNotice(n || { title: "제품 신청 안내", body: "본품: 매달 첫째주 화요일 마감 / 샘플: 매달 10일 전 영업일 마감", deadline: "" });
+    } catch(e) { console.error(e); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => { const fn = () => loadData(); window.addEventListener("focus", fn); return () => window.removeEventListener("focus", fn); }, [loadData]);
+
+  const saveNotice   = async () => { try { await saveNoticeDB(notice); } catch(e) { console.error(e); } setEditNotice(false); };
+  const updateStatus = async (id, status) => { const cur = apps.find(a=>a.id===id); if(!cur)return; try { await updateApplication(id, {status}, cur); } catch(e){ console.error(e); } const u = apps.map(a => a.id===id ? {...a,status} : a); setApps(u); if(selected?.id===id)setSelected(s=>({...s,status})); };
+  const bulkStatus   = async (status) => { if(!checkedIds.size)return; const toUpd=apps.filter(a=>checkedIds.has(a.id)); try { await Promise.all(toUpd.map(a=>updateApplication(a.id,{status},a))); } catch(e){ console.error(e); } const u=apps.map(a=>checkedIds.has(a.id)?{...a,status}:a); setApps(u); setCheckedIds(new Set()); };
+  const confirmPay   = async (id) => { const cur=apps.find(a=>a.id===id); if(!cur)return; try { await updateApplication(id,{status:"출고준비",payConfirmed:true},cur); } catch(e){ console.error(e); } const u=apps.map(a=>a.id===id?{...a,status:"출고준비",payConfirmed:true}:a); setApps(u); if(selected?.id===id)setSelected(s=>({...s,status:"출고준비",payConfirmed:true})); };
+  const deleteApp    = async (id) => { if(!window.confirm("삭제할까요?"))return; try { await removeApplication(id); } catch(e){ console.error(e); } const u=apps.filter(a=>a.id!==id); setApps(u); if(selected?.id===id)setSelected(null); };
+
+  const exportCSV = () => {
+    const headers = ["신청번호","이름","부서","신청일자","접수시각","결제","상태","제품구분","제품명","단가","수량","소계","본품합계","샘플합계","최종합계"];
+    const rows = [];
+    apps.forEach(a => {
+      const all=[...(a.mainProducts||[]).map(p=>({...p,type:"본품"})),...(a.sampleProducts||[]).map(p=>({...p,type:"샘플"}))];
+      if(!all.length){rows.push({신청번호:a.id,이름:a.name,부서:a.dept||"",신청일자:a.date,접수시각:a.submittedAt,결제:a.pay,상태:a.status,제품구분:"",제품명:"",단가:"",수량:"",소계:"",본품합계:a.totalMain||0,샘플합계:a.totalSample||0,최종합계:a.total||0});}
+      else all.forEach((p,i)=>rows.push({신청번호:i===0?a.id:"",이름:i===0?a.name:"",부서:i===0?(a.dept||""):"",신청일자:i===0?a.date:"",접수시각:i===0?a.submittedAt:"",결제:i===0?a.pay:"",상태:i===0?a.status:"",제품구분:p.type,제품명:p.name,단가:p.price,수량:p.qty,소계:p.price*p.qty,본품합계:i===0?(a.totalMain||0):"",샘플합계:i===0?(a.totalSample||0):"",최종합계:i===0?(a.total||0):""}));
+    });
+    const csv=[headers.join(","),...rows.map(r=>headers.map(h=>{const v=r[h]??"";return String(v).includes(",") ? `"${v}"`:v;}).join(","))].join("\n");
+    const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
+    const url=URL.createObjectURL(blob);const el=document.createElement("a");el.href=url;el.download=`신청내역_${today()}.csv`;el.click();URL.revokeObjectURL(url);
+  };
+
+  // 통계
+  const getStatApps = () => {
+    const now = new Date();
+    return apps.filter(a => {
+      if (a.status === "반려") return false;
+      const d = new Date(a.date);
+      if (useCustom) { if(dateFrom&&d<new Date(dateFrom))return false; if(dateTo&&d>new Date(dateTo))return false; return true; }
+      if (statRange === "daily")  return d.toDateString() === now.toDateString();
+      if (statRange === "weekly") { const s=new Date(now);s.setDate(now.getDate()-now.getDay());s.setHours(0,0,0,0);return d>=s; }
+      return d.getFullYear()===now.getFullYear()&&d.getMonth()===now.getMonth();
+    });
+  };
+  const buildProd = (list) => { const m={}; list.forEach(a=>{[...(a.mainProducts||[]).map(p=>({...p,cat:"본품"})),...(a.sampleProducts||[]).map(p=>({...p,cat:"샘플"}))].forEach(p=>{const k=`[${p.cat}] ${p.name}`;if(!m[k])m[k]={name:k,qty:0,amount:0};m[k].qty+=Number(p.qty)||0;m[k].amount+=(p.price||0)*(Number(p.qty)||0);});}); return Object.values(m).sort((a,b)=>b.amount-a.amount); };
+  const buildDept = (list) => { const m={}; list.forEach(a=>{const dept=a.dept||"미입력";if(!m[dept])m[dept]={dept,count:0,totalMain:0,totalSample:0,total:0,products:{}};m[dept].count++;m[dept].totalMain+=a.totalMain||0;m[dept].totalSample+=a.totalSample||0;m[dept].total+=a.total||0;[...(a.mainProducts||[]).map(p=>({...p,cat:"본품"})),...(a.sampleProducts||[]).map(p=>({...p,cat:"샘플"}))].forEach(p=>{const k=`[${p.cat}] ${p.name}`;if(!m[dept].products[k])m[dept].products[k]={qty:0,amount:0};m[dept].products[k].qty+=Number(p.qty)||0;m[dept].products[k].amount+=(p.price||0)*(Number(p.qty)||0);});}); return Object.values(m).sort((a,b)=>a.dept.localeCompare(b.dept,"ko")); };
+  const buildPay  = (list) => { const m={}; list.forEach(a=>{const pay=a.pay||"미입력";if(!m[pay])m[pay]={pay,count:0,total:0};m[pay].count++;m[pay].total+=a.total||0;}); return Object.values(m).sort((a,b)=>b.total-a.total); };
+  const buildPerson = () => { const m={}; apps.forEach(a=>{if(a.status==="반려")return;const k=a.name+"__"+(a.dept||"");if(!m[k])m[k]={name:a.name,dept:a.dept||"",count:0,totalMain:0,totalSample:0,total:0,products:{},lastDate:""};const p=m[k];p.count++;p.totalMain+=a.totalMain||0;p.totalSample+=a.totalSample||0;p.total+=a.total||0;if(!p.lastDate||a.date>p.lastDate)p.lastDate=a.date;[...(a.mainProducts||[]).map(x=>({...x,cat:"본품"})),...(a.sampleProducts||[]).map(x=>({...x,cat:"샘플"}))].forEach(x=>{const k2=`[${x.cat}] ${x.name}`;if(!p.products[k2])p.products[k2]={qty:0,amount:0};p.products[k2].qty+=Number(x.qty)||0;p.products[k2].amount+=(x.price||0)*(Number(x.qty)||0);});}); return Object.values(m).sort((a,b)=>a.name.localeCompare(b.name,"ko")); };
+
+  const statApps = getStatApps();
+  const prodStats = buildProd(statApps);
+  const deptStats = buildDept(statApps);
+  const payStats  = buildPay(statApps);
+  const personStats = buildPerson().filter(p => p.name.includes(personSearch) || p.dept.includes(personSearch));
+  const statTotal = statApps.reduce((s,a)=>s+(a.total||0),0);
+  const rangeDesc = useCustom ? (dateFrom||dateTo ? `${dateFrom||"~"} ~ ${dateTo||"~"}` : "전체 기간") : {daily:"오늘",weekly:"이번 주",monthly:"이번 달"}[statRange];
+
+  const stats = { total:apps.length, 접수:apps.filter(a=>a.status==="접수").length, 출고준비:apps.filter(a=>a.status==="출고준비").length, 반려:apps.filter(a=>a.status==="반려").length };
+  let displayed = statusFilter==="전체" ? apps : apps.filter(a=>a.status===statusFilter);
+  if(typeFilter==="본품") displayed=displayed.filter(a=>(a.mainProducts?.length||0)>0);
+  if(typeFilter==="샘플") displayed=displayed.filter(a=>(a.sampleProducts?.length||0)>0);
+  const grouped = (() => { const m={}; displayed.forEach(a=>{const k=a.date||"날짜없음";if(!m[k])m[k]=[];m[k].push(a);}); return Object.entries(m).sort(([a],[b])=>b.localeCompare(a)); })();
+
+  return (
+    <div style={{ fontFamily: FF, maxWidth: 1000, margin: "0 auto", padding: "20px 14px 60px", display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* 헤더 */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:"#fff", border:"1px solid #E5E7EB", borderRadius:12, padding:"16px 20px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", flexWrap:"wrap", gap:10 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+          <div style={{ width:38,height:38,background:"#111827",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18 }}>⚙️</div>
+          <div><div style={{ fontWeight:800,fontSize:18 }}>관리자 대시보드</div><div style={{ fontSize:12,color:"#6B7280" }}>제품 신청 관리 시스템</div></div>
+        </div>
+        <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
+          <button style={{ ...BS,background:"#F0FDF4",color:"#059669",borderColor:"#BBF7D0" }} onClick={exportCSV}>📥 CSV</button>
+          <button style={{ ...BS,background:"#FFF7ED",color:"#C2410C",borderColor:"#FED7AA" }} onClick={onGoShip}>🚚 출고 관리</button>
+          <button style={BS} onClick={loadData}>🔄 새로고침</button>
+          <button style={BO} onClick={onBack}>← 신청서</button>
+          <button style={{ ...BS,background:"#FEF2F2",color:"#DC2626",borderColor:"#FECACA" }} onClick={onLogout}>로그아웃</button>
+        </div>
+      </div>
+
+      {/* 통계 카드 */}
+      <div className="stat-grid" style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12 }}>
+        {[["전체",stats.total,"#1A56DB"],["접수",stats.접수,"#6366F1"],["출고준비",stats.출고준비,"#0891B2"],["반려",stats.반려,"#DC2626"]].map(([l,v,c]) => (
+          <div key={l} onClick={() => { setTab("list"); setStatusFilter(l); }}
+            style={{ background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,padding:"16px 18px",boxShadow:"0 1px 3px rgba(0,0,0,0.04)",borderTop:`3px solid ${c}`,cursor:"pointer",...(statusFilter===l&&tab==="list"?{boxShadow:`0 0 0 2px ${c}`}:{}) }}>
+            <div style={{ fontSize:22,fontWeight:800,color:c,fontFamily:"monospace" }}>{v}</div>
+            <div style={{ fontSize:12,color:"#6B7280" }}>{l}</div>
+            <div style={{ fontSize:10,color:"#C4C9D4",marginTop:2 }}>클릭하여 필터</div>
+          </div>
+        ))}
+      </div>
+
+      {/* 공지사항 */}
+      <div style={{ background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,padding:"18px 16px",boxShadow:"0 1px 3px rgba(0,0,0,0.04)" }}>
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
+          <div style={{ fontWeight:700,fontSize:14 }}>📢 공지사항 관리</div>
+          {!editNotice
+            ? <button style={BS} onClick={()=>setEditNotice(true)}>편집</button>
+            : <div style={{ display:"flex",gap:8 }}><button style={{ ...BS,background:"#EEF3FF",color:"#1A56DB" }} onClick={saveNotice}>저장</button><button style={BS} onClick={()=>setEditNotice(false)}>취소</button></div>}
+        </div>
+        {editNotice ? (
+          <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+            <input style={INP} placeholder="공지 제목" value={notice.title} onChange={e=>setNotice(n=>({...n,title:e.target.value}))} />
+            <textarea style={{ ...INP,minHeight:80,resize:"vertical" }} value={notice.body} onChange={e=>setNotice(n=>({...n,body:e.target.value}))} />
+            <input type="date" style={INP} value={notice.deadline} onChange={e=>setNotice(n=>({...n,deadline:e.target.value}))} />
+          </div>
+        ) : (
+          <div>
+            <div style={{ fontWeight:700,fontSize:15,marginBottom:4 }}>{notice.title||"(제목 없음)"}</div>
+            <div style={{ fontSize:13,color:"#6B7280",lineHeight:1.6 }}>{notice.body||"(내용 없음)"}</div>
+            {notice.deadline&&<div style={{ fontSize:12,marginTop:8,color:"#1A56DB",fontWeight:600 }}>📅 마감일: {notice.deadline}</div>}
+          </div>
+        )}
+      </div>
+
+      {/* 탭 */}
+      <div style={{ background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,padding:"18px 16px",boxShadow:"0 1px 3px rgba(0,0,0,0.04)" }}>
+        <div style={{ display:"flex",borderBottom:"1px solid #E5E7EB",marginBottom:16,overflowX:"auto" }}>
+          {[["list","📋 신청 목록"],["stats","📊 통계"],["person","👤 신청자별 통계"]].map(([k,l]) => (
+            <button key={k} onClick={()=>setTab(k)} style={{ padding:"10px 16px",border:"none",background:"transparent",fontFamily:"inherit",fontWeight:tab===k?700:500,fontSize:14,color:tab===k?"#1A56DB":"#6B7280",borderBottom:tab===k?"2px solid #1A56DB":"2px solid transparent",cursor:"pointer",whiteSpace:"nowrap" }}>{l}</button>
+          ))}
+        </div>
+
+        {/* 신청 목록 */}
+        {tab==="list" && (
+          <>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8 }}>
+              <div style={{ fontSize:14,fontWeight:700 }}>일별 신청 내역</div>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                {["전체","본품","샘플"].map(t=><button key={t} style={{ ...FB,...(typeFilter===t?{background:"#111827",color:"#fff",borderColor:"#111827"}:{}) }} onClick={()=>setTypeFilter(t)}>{t}</button>)}
+                <div style={{ width:1,height:18,background:"#E5E7EB" }} />
+                {["전체","접수","출고준비","반려"].map(s=><button key={s} style={{ ...FB,...(statusFilter===s?FBA:{}) }} onClick={()=>setStatusFilter(s)}>{s}</button>)}
+              </div>
+            </div>
+            {checkedIds.size>0&&(
+              <div style={{ display:"flex",alignItems:"center",gap:10,background:"#111827",borderRadius:8,padding:"10px 16px",marginBottom:12,flexWrap:"wrap" }}>
+                <span style={{ fontSize:13,color:"#fff",fontWeight:600 }}>{checkedIds.size}건 선택</span>
+                <div style={{ flex:1 }} />
+                {["출고준비","반려"].map(st=><button key={st} style={{ padding:"6px 14px",border:"none",borderRadius:6,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",background:st==="출고준비"?"#0891B2":"#DC2626",color:"#fff" }} onClick={()=>bulkStatus(st)}>{st}</button>)}
+                <button style={{ padding:"6px 12px",border:"1px solid rgba(255,255,255,0.3)",borderRadius:6,fontSize:12,background:"transparent",color:"#9CA3AF",cursor:"pointer",fontFamily:"inherit" }} onClick={()=>setCheckedIds(new Set())}>취소</button>
+              </div>
+            )}
+            {loading ? <div style={{ textAlign:"center",padding:40,color:"#9CA3AF" }}>불러오는 중...</div>
+              : grouped.length===0 ? <div style={{ textAlign:"center",padding:40,color:"#9CA3AF" }}>신청 내역이 없습니다.</div>
+              : grouped.map(([date,dayApps]) => (
+                <div key={date} style={{ marginBottom:20 }}>
+                  <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:8 }}>
+                    <div style={{ fontWeight:700,fontSize:13 }}>📅 {date}</div>
+                    <div style={{ flex:1,height:1,background:"#E5E7EB" }} />
+                    <div style={{ fontSize:12,color:"#6B7280" }}>{dayApps.length}건 · {fmt(dayApps.reduce((s,a)=>s+(a.total||0),0))}</div>
+                  </div>
+                  <div style={{ overflowX:"auto" }}>
+                    <table style={{ width:"100%",borderCollapse:"collapse",fontSize:13 }}>
+                      <thead>
+                        <tr style={{ background:"#F9FAFB" }}>
+                          <th style={{ ...TH,width:36 }}>
+                            <input type="checkbox" style={{ accentColor:"#1A56DB" }}
+                              checked={dayApps.length>0&&dayApps.every(a=>checkedIds.has(a.id))}
+                              onChange={e=>{const n=new Set(checkedIds);dayApps.forEach(a=>e.target.checked?n.add(a.id):n.delete(a.id));setCheckedIds(n);}} />
+                          </th>
+                          {["신청번호","이름","부서","본품","샘플","합계","결제","상태",""].map(h=><th key={h} style={TH}>{h}</th>)}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dayApps.map(a => (
+                          <React.Fragment key={a.id}>
+                            <tr style={{ cursor:"pointer",background:checkedIds.has(a.id)?"#F0F4FF":selected?.id===a.id?"#EEF3FF":"#fff" }}
+                              onClick={()=>setSelected(p=>p?.id===a.id?null:a)}>
+                              <td style={TD} onClick={e=>e.stopPropagation()}><input type="checkbox" style={{ accentColor:"#1A56DB" }} checked={checkedIds.has(a.id)} onChange={e=>{const n=new Set(checkedIds);e.target.checked?n.add(a.id):n.delete(a.id);setCheckedIds(n);}}/></td>
+                              <td style={{ ...TD,fontFamily:"monospace",fontSize:12,color:"#6366F1" }}>{a.id}</td>
+                              <td style={{ ...TD,fontWeight:600 }}>{a.name}</td>
+                              <td style={{ ...TD,color:"#6B7280" }}>{a.dept||"—"}</td>
+                              <td style={{ ...TD,textAlign:"center" }}>{(a.mainProducts?.length||0)>0?<span style={{ display:"inline-block",padding:"3px 8px",borderRadius:20,fontSize:12,fontWeight:700,background:"#EEF3FF",color:"#1A56DB" }}>{a.mainProducts.length}종</span>:<span style={{ color:"#D1D5DB" }}>—</span>}</td>
+                              <td style={{ ...TD,textAlign:"center" }}>{(a.sampleProducts?.length||0)>0?<span style={{ display:"inline-block",padding:"3px 8px",borderRadius:20,fontSize:12,fontWeight:700,background:"#F0FDF4",color:"#059669" }}>{a.sampleProducts.length}종</span>:<span style={{ color:"#D1D5DB" }}>—</span>}</td>
+                              <td style={{ ...TD,fontFamily:"monospace",fontWeight:700,color:"#1A56DB" }}>{fmt(a.total||0)}</td>
+                              <td style={TD}>{a.pay}</td>
+                              <td style={TD}><span style={{ display:"inline-block",padding:"3px 8px",borderRadius:20,fontSize:12,fontWeight:700,background:(STATUS_COLOR[a.status]||"#aaa")+"22",color:STATUS_COLOR[a.status]||"#aaa" }}>{a.status}</span></td>
+                              <td style={TD}><button style={BT} onClick={e=>{e.stopPropagation();deleteApp(a.id);}}>삭제</button></td>
+                            </tr>
+                            {selected?.id===a.id&&(
+                              <tr><td colSpan={10} style={{ padding:0 }}>
+                                <InlineDetail app={selected} onStatusChange={st=>updateStatus(a.id,st)} onPayConfirm={()=>confirmPay(a.id)} onClose={()=>setSelected(null)} />
+                              </td></tr>
+                            )}
+                          </React.Fragment>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
+          </>
+        )}
+
+        {/* 통계 */}
+        {tab==="stats" && (
+          <>
+            <div style={{ background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,padding:"14px 16px",marginBottom:14 }}>
+              <div style={{ fontSize:12,fontWeight:700,marginBottom:10 }}>📅 조회 기간</div>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:8 }}>
+                {[["daily","오늘"],["weekly","이번 주"],["monthly","이번 달"]].map(([k,l])=><button key={k} style={{ ...FB,...(!useCustom&&statRange===k?FBA:{}) }} onClick={()=>{setStatRange(k);setUseCustom(false);}}>{l}</button>)}
+                <button style={{ ...FB,...(useCustom?FBA:{}) }} onClick={()=>setUseCustom(true)}>📆 직접 선택</button>
+              </div>
+              {useCustom&&(
+                <div style={{ display:"flex",gap:10,alignItems:"center",flexWrap:"wrap" }}>
+                  <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+                    <span style={{ fontSize:12,color:"#6B7280" }}>시작</span>
+                    <input type="date" style={{ ...INP,width:"auto",fontSize:13,padding:"7px 10px" }} value={dateFrom} max={dateTo||today()} onChange={e=>{if(dateTo&&(new Date(dateTo)-new Date(e.target.value))/86400000>365){alert("최대 1년까지 선택 가능합니다.");return;}setDateFrom(e.target.value);}} />
+                  </div>
+                  <span style={{ color:"#9CA3AF" }}>~</span>
+                  <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+                    <span style={{ fontSize:12,color:"#6B7280" }}>종료</span>
+                    <input type="date" style={{ ...INP,width:"auto",fontSize:13,padding:"7px 10px" }} value={dateTo} min={dateFrom} max={today()} onChange={e=>{if(dateFrom&&(new Date(e.target.value)-new Date(dateFrom))/86400000>365){alert("최대 1년까지 선택 가능합니다.");return;}setDateTo(e.target.value);}} />
+                  </div>
+                  <button style={{ ...BT,color:"#DC2626",borderColor:"#FECACA" }} onClick={()=>{setDateFrom("");setDateTo("");}}>초기화</button>
+                </div>
+              )}
+            </div>
+            <div style={{ background:"#F0F4FF",border:"1px solid #C7D7FB",borderRadius:8,padding:"14px 16px",marginBottom:14,display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:8 }}>
+              <div><div style={{ fontSize:12,color:"#6B7280" }}>{rangeDesc} 총 신청 금액</div><div style={{ fontFamily:"monospace",fontWeight:800,fontSize:22,color:"#1A56DB" }}>{fmt(statTotal)}</div></div>
+              <div style={{ textAlign:"right" }}><div style={{ fontSize:12,color:"#6B7280" }}>{rangeDesc} 신청 건수</div><div style={{ fontFamily:"monospace",fontWeight:800,fontSize:22 }}>{statApps.length}건</div></div>
+            </div>
+            <div style={{ display:"flex",gap:6,marginBottom:14,flexWrap:"wrap" }}>
+              {[["prod","📦 제품별"],["dept","🏢 부서별"],["pay","💳 결제수단별"]].map(([k,l])=><button key={k} style={{ ...FB,...(statSubTab===k?FBA:{}) }} onClick={()=>setStatSubTab(k)}>{l}</button>)}
+            </div>
+            {statSubTab==="prod"&&(prodStats.length===0?<SAEmpty>{rangeDesc} 데이터 없음</SAEmpty>:<table style={{ width:"100%",borderCollapse:"collapse",fontSize:13 }}><thead><tr style={{ background:"#F9FAFB" }}>{["제품명","총 수량","총 금액"].map(h=><th key={h} style={TH}>{h}</th>)}</tr></thead><tbody>{prodStats.map((p,i)=><tr key={i}><td style={{ ...TD,fontWeight:600 }}>{p.name}</td><td style={{ ...TD,fontFamily:"monospace" }}>{p.qty.toLocaleString()}</td><td style={{ ...TD,fontFamily:"monospace",fontWeight:700,color:"#1A56DB" }}>{fmt(p.amount)}</td></tr>)}</tbody></table>)}
+            {statSubTab==="dept"&&(deptStats.length===0?<SAEmpty>{rangeDesc} 데이터 없음</SAEmpty>:<div style={{ display:"flex",flexDirection:"column",gap:8 }}>{deptStats.map((d,i)=><DeptCard key={i} dept={d}/>)}</div>)}
+            {statSubTab==="pay"&&(payStats.length===0?<SAEmpty>{rangeDesc} 데이터 없음</SAEmpty>:<><div style={{ display:"flex",gap:10,marginBottom:14,flexWrap:"wrap" }}>{payStats.map((p,i)=>{const isCard=p.pay==="카드결제",color=isCard?"#6366F1":"#1A56DB",bg=isCard?"#F5F3FF":"#EEF3FF",border=isCard?"#DDD6FE":"#C7D7FB",pct=statApps.length>0?Math.round(p.count/statApps.length*100):0;return(<div key={i} style={{ flex:1,minWidth:140,background:bg,border:`1.5px solid ${border}`,borderRadius:10,padding:"14px 16px" }}><div style={{ fontSize:20,marginBottom:6 }}>{isCard?"💳":"🏦"}</div><div style={{ fontWeight:800,fontSize:14,marginBottom:2 }}>{p.pay}</div><div style={{ fontFamily:"monospace",fontWeight:800,fontSize:20,color }}>{fmt(p.total)}</div><div style={{ fontSize:12,color:"#6B7280",marginTop:4 }}>{p.count}건 · {pct}%</div><div style={{ height:4,background:"#E5E7EB",borderRadius:4,marginTop:8 }}><div style={{ height:"100%",width:`${pct}%`,background:color,borderRadius:4 }}/></div></div>);})}</div><table style={{ width:"100%",borderCollapse:"collapse",fontSize:13 }}><thead><tr style={{ background:"#F9FAFB" }}>{["결제 수단","건수","비율","총 금액"].map(h=><th key={h} style={TH}>{h}</th>)}</tr></thead><tbody>{payStats.map((p,i)=>{const pct=statApps.length>0?Math.round(p.count/statApps.length*100):0;return(<tr key={i}><td style={{ ...TD,fontWeight:700 }}>{p.pay==="카드결제"?"💳 ":"🏦 "}{p.pay}</td><td style={{ ...TD,fontFamily:"monospace" }}>{p.count}건</td><td style={{ ...TD,fontFamily:"monospace",color:"#6B7280" }}>{pct}%</td><td style={{ ...TD,fontFamily:"monospace",fontWeight:700,color:"#1A56DB" }}>{fmt(p.total)}</td></tr>);})}</tbody></table></>)}
+          </>
+        )}
+
+        {/* 신청자별 통계 */}
+        {tab==="person"&&(
+          <>
+            <div style={{ position:"relative",marginBottom:16 }}>
+              <span style={{ position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:"#9CA3AF",pointerEvents:"none" }}>🔍</span>
+              <input style={{ ...INP,paddingLeft:36 }} placeholder="이름 또는 부서로 검색..." value={personSearch} onChange={e=>setPersonSearch(e.target.value)} />
+              {personSearch&&<button onClick={()=>setPersonSearch("")} style={{ position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",fontSize:16,color:"#9CA3AF",cursor:"pointer" }}>✕</button>}
+            </div>
+            <div style={{ display:"flex",gap:10,marginBottom:16 }}>
+              <div style={{ background:"#F0F4FF",border:"1px solid #C7D7FB",borderRadius:8,padding:"10px 16px",flex:1 }}><div style={{ fontSize:11,color:"#6B7280" }}>총 신청자</div><div style={{ fontFamily:"monospace",fontWeight:800,fontSize:20,color:"#1A56DB" }}>{personStats.length}명</div></div>
+              <div style={{ background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:8,padding:"10px 16px",flex:1 }}><div style={{ fontSize:11,color:"#6B7280" }}>총 신청 금액</div><div style={{ fontFamily:"monospace",fontWeight:800,fontSize:20,color:"#059669" }}>{fmt(personStats.reduce((s,p)=>s+p.total,0))}</div></div>
+            </div>
+            {personStats.length===0?<SAEmpty>{personSearch?`"${personSearch}" 검색 결과 없음`:"신청 내역이 없습니다."}</SAEmpty>
+              :<div style={{ display:"flex",flexDirection:"column",gap:10 }}>{personStats.map((p,i)=><PersonCard key={i} person={p}/>)}</div>}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════
+   인라인 상세 패널
+════════════════════════════════════════════════════════ */
+function InlineDetail({ app, onStatusChange, onPayConfirm, onClose }) {
+  const paid = app.payConfirmed || app.status === "출고준비";
+  return (
+    <div style={{ padding:"16px 20px",borderTop:"2px solid #1A56DB",background:"#F8FAFF" }}>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+        <div style={{ fontWeight:700,fontSize:13,color:"#1A56DB" }}>📋 {app.id}</div>
+        <button style={{ background:"none",border:"none",fontSize:16,cursor:"pointer",color:"#9CA3AF" }} onClick={onClose}>✕</button>
+      </div>
+      <div className="detail-grid" style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14 }}>
+        {[["신청자",app.name],["부서",app.dept||"—"],["신청일",app.date],["결제",app.pay+(app.cardCompany?` (${app.cardCompany})`:"")] ,["접수시각",app.submittedAt],
+          ...(app.cardNumber?[["카드사",app.cardCompany||"—"],["카드번호",app.cardNumber],["유효기간",app.cardExpiry]]:[])
+        ].map(([l,v]) => (
+          <div key={l} style={{ background:"#fff",border:"1px solid #E5E7EB",borderRadius:7,padding:"8px 12px" }}>
+            <div style={{ fontSize:10,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:2 }}>{l}</div>
+            <div style={{ fontSize:13,fontWeight:600 }}>{v}</div>
+          </div>
+        ))}
+      </div>
+      {(app.mainProducts||[]).length>0&&<div style={{ marginBottom:10 }}><div style={{ fontSize:11,fontWeight:700,color:"#1A56DB",marginBottom:6 }}>📦 본품</div>{app.mainProducts.map((p,i)=><div key={i} style={{ display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px dashed #F3F4F6" }}><span style={{ fontSize:13,fontWeight:600 }}>{p.name}</span><div><span style={{ fontSize:12,color:"#6B7280",marginRight:8 }}>{p.qty}개</span><span style={{ fontSize:13,color:"#1A56DB",fontWeight:700 }}>{fmt(p.price*p.qty)}</span></div></div>)}</div>}
+      {(app.sampleProducts||[]).length>0&&<div style={{ marginBottom:10 }}><div style={{ fontSize:11,fontWeight:700,color:"#059669",marginBottom:6 }}>🧪 샘플</div>{app.sampleProducts.map((p,i)=><div key={i} style={{ display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px dashed #F3F4F6" }}><span style={{ fontSize:13,fontWeight:600 }}>{p.name}</span><div><span style={{ fontSize:12,color:"#6B7280",marginRight:8 }}>{p.qty}{p.minQty>=100?"장":"개"}</span><span style={{ fontSize:13,color:"#059669",fontWeight:700 }}>{fmt(p.price*p.qty)}</span></div></div>)}</div>}
+      <div style={{ display:"flex",justifyContent:"flex-end",gap:10,borderTop:"2px solid #E5E7EB",paddingTop:10,marginBottom:14 }}>
+        <span style={{ fontSize:13,fontWeight:600 }}>최종 합계</span>
+        <span style={{ fontFamily:"monospace",fontWeight:800,fontSize:18,color:"#1A56DB" }}>{fmt(app.total||0)}</span>
+      </div>
+      <div style={{ background:paid?"#F0FDF4":"#FFF7ED",border:`1.5px solid ${paid?"#BBF7D0":"#FED7AA"}`,borderRadius:8,padding:"12px 14px",marginBottom:14 }}>
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+          <div>
+            <div style={{ fontSize:13,fontWeight:700,color:paid?"#059669":"#92400E" }}>{paid?"✅ 입금 확인 완료":"💰 입금 확인 필요"}</div>
+            <div style={{ fontSize:11,color:"#9CA3AF",marginTop:2 }}>결제: {app.pay}</div>
+          </div>
+          {!paid&&<button style={{ padding:"8px 16px",background:"#059669",color:"#fff",border:"none",borderRadius:7,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit" }} onClick={onPayConfirm}>입금 확인 → 출고준비</button>}
+          {app.status==="출고준비"&&<span style={{ fontSize:12,background:"#0891B2",color:"#fff",padding:"4px 10px",borderRadius:20,fontWeight:700 }}>출고준비</span>}
+        </div>
+      </div>
+      <div>
+        <div style={{ fontSize:11,color:"#9CA3AF",marginBottom:8 }}>상태 변경</div>
+        <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+          {["접수","출고준비","반려"].map(st=>(
+            <button key={st} style={{ padding:"5px 12px",border:`1.5px solid ${app.status===st?(STATUS_COLOR[st]||"#aaa"):"#E5E7EB"}`,borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",background:app.status===st?(STATUS_COLOR[st]||"#aaa"):"#fff",color:app.status===st?"#fff":(STATUS_COLOR[st]||"#6B7280") }} onClick={()=>onStatusChange(st)}>{st}</button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════
+   출고 관리 페이지
+════════════════════════════════════════════════════════ */
+function ShipPage({ onBack }) {
+  const [apps,         setApps]         = useState([]);
+  const [loading,      setLoading]      = useState(true);
+  const [mainTab,      setMainTab]      = useState("overview");
+  const [viewMode,     setViewMode]     = useState("date");
+  const [statusFilter, setStatusFilter] = useState("전체");
+  const [filterDate,   setFilterDate]   = useState("");
+  const [filterName,   setFilterName]   = useState("");
+  const [selectedKey,  setSelectedKey]  = useState(null);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try { setApps(await loadApplications()); }
+    catch(e) { console.error(e); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => { const fn=()=>loadData(); window.addEventListener("focus",fn); return()=>window.removeEventListener("focus",fn); }, [loadData]);
+
+  const updateShip = async (id, shipStatus) => { const cur=apps.find(a=>a.id===id); if(!cur)return; try { await updateApplication(id,{shipStatus},cur); } catch(e){ console.error(e); } setApps(apps.map(a=>a.id===id?{...a,shipStatus}:a)); };
+  const bulkShip   = async (ids, shipStatus) => { const toUpd=apps.filter(a=>ids.includes(a.id)); try { await Promise.all(toUpd.map(a=>updateApplication(a.id,{shipStatus},a))); } catch(e){ console.error(e); } setApps(apps.map(a=>ids.includes(a.id)?{...a,shipStatus}:a)); };
+
+  const exportCSV = () => {
+    const headers=["신청번호","이름","부서","신청일자","결제","출고상태","제품구분","제품명","수량"];
+    const rows=[];
+    shipApps.forEach(a=>{
+      const all=[...(a.mainProducts||[]).map(p=>({...p,type:"본품"})),...(a.sampleProducts||[]).map(p=>({...p,type:"샘플"}))];
+      if(!all.length){rows.push({신청번호:a.id,이름:a.name,부서:a.dept||"",신청일자:a.date,결제:a.pay,출고상태:a.shipStatus||"출고예정",제품구분:"",제품명:"",수량:""});}
+      else all.forEach((p,i)=>rows.push({신청번호:i===0?a.id:"",이름:i===0?a.name:"",부서:i===0?(a.dept||""):"",신청일자:i===0?a.date:"",결제:i===0?a.pay:"",출고상태:i===0?(a.shipStatus||"출고예정"):"",제품구분:p.type,제품명:p.name,수량:p.qty}));
+    });
+    const csv=[headers.join(","),...rows.map(r=>headers.map(h=>{const v=r[h]??"";return String(v).includes(",")?`"${v}"`:v;}).join(","))].join("\n");
+    const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
+    const url=URL.createObjectURL(blob);const el=document.createElement("a");el.href=url;el.download=`출고관리_${today()}.csv`;el.click();URL.revokeObjectURL(url);
+  };
+
+  const sumProds = (list, tf) => {
+    const m={};
+    list.forEach(a=>{
+      const prods=tf==="본품"?(a.mainProducts||[]).map(p=>({...p,type:"본품"})):tf==="샘플"?(a.sampleProducts||[]).map(p=>({...p,type:"샘플"})):[...(a.mainProducts||[]).map(p=>({...p,type:"본품"})),...(a.sampleProducts||[]).map(p=>({...p,type:"샘플"}))];
+      prods.forEach(p=>{const k=`[${p.type}] ${p.name}`;if(!m[k])m[k]={name:p.name,type:p.type,qty:0};m[k].qty+=Number(p.qty)||0;});
+    });
+    return Object.values(m).sort((a,b)=>a.type.localeCompare(b.type)||a.name.localeCompare(b.name,"ko"));
+  };
+
+  const shipApps = apps.filter(a => a.status === "출고준비");
+  const totalDone    = shipApps.filter(a=>a.shipStatus==="출고완료").length;
+  const totalPending = shipApps.length - totalDone;
+
+  const buildGroups = () => {
+    let f=[...shipApps];
+    if(filterDate) f=f.filter(a=>a.date===filterDate);
+    if(filterName.trim()) f=f.filter(a=>a.name.includes(filterName.trim())||(a.dept||"").includes(filterName.trim()));
+    if(statusFilter==="출고예정") f=f.filter(a=>(a.shipStatus||"출고예정")==="출고예정");
+    if(statusFilter==="출고완료") f=f.filter(a=>a.shipStatus==="출고완료");
+    const m={};
+    f.forEach(a=>{const k=viewMode==="date"?(a.date||"날짜없음"):viewMode==="dept"?(a.dept||"미입력"):`${a.name} / ${a.dept||""}`;if(!m[k])m[k]=[];m[k].push(a);});
+    return Object.entries(m).sort(([a],[b])=>viewMode==="date"?b.localeCompare(a):a.localeCompare(b,"ko"));
+  };
+
+  const buildPickup = () => {
+    const mm={},sm={};
+    shipApps.forEach(a=>{
+      if((a.mainProducts||[]).length){const d=getMainPickup(a.date),k=d.toISOString().split("T")[0];if(!mm[k])mm[k]={pickupDate:k,pickupLabel:fmtDate(d),apps:[]};mm[k].apps.push(a);}
+      if((a.sampleProducts||[]).length){const k=getSampleDeadline(a.date);if(!sm[k])sm[k]={label:k,apps:[]};sm[k].apps.push(a);}
+    });
+    return {main:Object.values(mm).sort((a,b)=>a.pickupDate.localeCompare(b.pickupDate)),sample:Object.values(sm)};
+  };
+
+  const groups  = buildGroups();
+  const pickup  = buildPickup();
+
+  return (
+    <div style={{ fontFamily:FF,maxWidth:1000,margin:"0 auto",padding:"20px 14px 60px",display:"flex",flexDirection:"column",gap:14 }}>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:"#fff",border:"1px solid #E5E7EB",borderRadius:12,padding:"16px 20px",boxShadow:"0 1px 4px rgba(0,0,0,0.06)",flexWrap:"wrap",gap:10 }}>
+        <div style={{ display:"flex",alignItems:"center",gap:12 }}>
+          <div style={{ width:38,height:38,background:"#C2410C",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18 }}>🚚</div>
+          <div><div style={{ fontWeight:800,fontSize:18 }}>출고 관리</div><div style={{ fontSize:12,color:"#6B7280" }}>출고준비 신청 기준</div></div>
+        </div>
+        <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
+          <button style={{ ...BS,background:"#F0FDF4",color:"#059669",borderColor:"#BBF7D0" }} onClick={exportCSV}>📥 CSV</button>
+          <button style={BS} onClick={loadData}>🔄 새로고침</button>
+          <button style={BO} onClick={onBack}>← 관리자</button>
+        </div>
+      </div>
+
+      <div className="stat-grid" style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12 }}>
+        {[["전체 출고 대상",shipApps.length,"#1A56DB","전체"],["출고 예정",totalPending,"#F59E0B","출고예정"],["출고 완료",totalDone,"#059669","출고완료"]].map(([l,v,c,sf])=>(
+          <div key={l} onClick={()=>{setMainTab("overview");setStatusFilter(sf);setSelectedKey(null);}} style={{ background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,padding:"16px 18px",boxShadow:"0 1px 3px rgba(0,0,0,0.04)",borderTop:`3px solid ${c}`,cursor:"pointer" }}>
+            <div style={{ fontSize:22,fontWeight:800,color:c,fontFamily:"monospace" }}>{v}</div>
+            <div style={{ fontSize:12,color:"#6B7280" }}>{l}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,padding:"18px 16px",boxShadow:"0 1px 3px rgba(0,0,0,0.04)" }}>
+        <div style={{ display:"flex",borderBottom:"1px solid #E5E7EB",marginBottom:16 }}>
+          {[["overview","📋 출고 목록"],["main","📦 본품 출고 현황"],["sample","🧪 샘플 출고 현황"]].map(([k,l])=>(
+            <button key={k} onClick={()=>{setMainTab(k);setSelectedKey(null);}} style={{ padding:"10px 16px",border:"none",background:"transparent",fontFamily:"inherit",fontWeight:mainTab===k?700:500,fontSize:13,color:mainTab===k?"#1A56DB":"#6B7280",borderBottom:mainTab===k?"2px solid #1A56DB":"2px solid transparent",cursor:"pointer",whiteSpace:"nowrap" }}>{l}</button>
+          ))}
+        </div>
+
+        {mainTab==="overview"&&(
+          <>
+            <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:12 }}>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                {[["date","📅 일자별"],["dept","🏢 부서별"],["person","👤 신청자별"]].map(([k,l])=><button key={k} style={{ ...FB,...(viewMode===k?FBA:{}) }} onClick={()=>{setViewMode(k);setSelectedKey(null);}}>{l}</button>)}
+                <div style={{ width:1,height:18,background:"#E5E7EB" }} />
+                {["전체","출고예정","출고완료"].map(s=><button key={s} style={{ ...FB,...(statusFilter===s?FBA:{}) }} onClick={()=>{setStatusFilter(s);setSelectedKey(null);}}>{s}</button>)}
+              </div>
+              <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
+                <input type="date" style={{ ...INP,width:"auto",fontSize:13,padding:"7px 10px",flex:1,minWidth:130 }} value={filterDate} onChange={e=>{setFilterDate(e.target.value);setSelectedKey(null);}} />
+                <div style={{ position:"relative",flex:1,minWidth:140 }}>
+                  <span style={{ position:"absolute",left:10,top:"50%",transform:"translateY(-50%)",color:"#9CA3AF",pointerEvents:"none" }}>🔍</span>
+                  <input style={{ ...INP,paddingLeft:28,fontSize:13,padding:"7px 10px 7px 28px" }} placeholder="이름 또는 부서" value={filterName} onChange={e=>{setFilterName(e.target.value);setSelectedKey(null);}} />
+                </div>
+                {(filterDate||filterName)&&<button style={BT} onClick={()=>{setFilterDate("");setFilterName("");setSelectedKey(null);}}>초기화</button>}
+              </div>
+            </div>
+            {loading?<div style={{ textAlign:"center",padding:40,color:"#9CA3AF" }}>불러오는 중...</div>
+              :groups.length===0?<div style={{ textAlign:"center",padding:40,color:"#9CA3AF" }}>해당 조건의 출고 내역이 없습니다.</div>
+              :<div style={{ display:"flex",gap:12 }}>
+                <div style={{ width:200,flexShrink:0,display:"flex",flexDirection:"column",gap:6 }}>
+                  {groups.map(([key,list])=>{const allDone=list.every(a=>a.shipStatus==="출고완료"),isSel=selectedKey===key;return(
+                    <div key={key} onClick={()=>setSelectedKey(isSel?null:key)}
+                      style={{ padding:"10px 12px",borderRadius:8,cursor:"pointer",userSelect:"none",border:`1.5px solid ${isSel?"#1A56DB":allDone?"#BBF7D0":"#E5E7EB"}`,background:isSel?"#EEF3FF":allDone?"#F0FDF4":"#F9FAFB" }}>
+                      <div style={{ fontWeight:700,fontSize:13,color:isSel?"#1A56DB":"#111",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>
+                        {viewMode==="date"?"📅 ":viewMode==="dept"?"🏢 ":"👤 "}{key}
+                      </div>
+                      <div style={{ fontSize:11,color:"#9CA3AF",marginTop:2 }}>{list.length}건</div>
+                      <div style={{ fontSize:11,color:allDone?"#059669":"#F59E0B",fontWeight:600 }}>{allDone?"✅ 출고완료":"⏳ 출고예정"}</div>
+                    </div>
+                  );})}
+                </div>
+                <div style={{ flex:1,minWidth:0 }}>
+                  {!selectedKey?<div style={{ textAlign:"center",padding:"40px 20px",color:"#9CA3AF",background:"#F9FAFB",borderRadius:8,border:"1.5px dashed #E5E7EB" }}>왼쪽 목록을 클릭하면 상세 내용이 표시됩니다.</div>
+                    :(() => {
+                      const list=groups.find(([k])=>k===selectedKey)?.[1]||[];
+                      const prods=sumProds(list,"전체"),allDone=list.every(a=>a.shipStatus==="출고완료");
+                      return(
+                        <div style={{ border:`1.5px solid ${allDone?"#BBF7D0":"#E5E7EB"}`,borderRadius:10,overflow:"hidden" }}>
+                          <div style={{ display:"flex",alignItems:"center",gap:12,padding:"12px 16px",background:allDone?"#F0FDF4":"#F9FAFB",borderBottom:"1px solid #E5E7EB" }}>
+                            <div style={{ flex:1 }}><div style={{ fontWeight:700,fontSize:14 }}>{selectedKey}</div><div style={{ fontSize:12,color:"#6B7280" }}>{list.length}건 · {prods.length}종</div></div>
+                            <button style={{ padding:"7px 16px",border:"none",borderRadius:7,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",background:allDone?"#059669":"#1A56DB",color:"#fff" }} onClick={()=>bulkShip(list.map(a=>a.id),allDone?"출고예정":"출고완료")}>{allDone?"✅ 출고완료":"📦 출고완료로 변경"}</button>
+                          </div>
+                          <div style={{ padding:"10px 16px" }}><ShipProdTable prods={prods} allDone={allDone} /></div>
+                          {viewMode==="date"&&<div style={{ padding:"6px 16px 12px",borderTop:"1px dashed #E5E7EB" }}>
+                            <div style={{ fontSize:11,color:"#9CA3AF",marginBottom:6,marginTop:6 }}>신청자별 출고 상태</div>
+                            <div style={{ display:"flex",flexWrap:"wrap",gap:6 }}>
+                              {list.map(a=>(
+                                <div key={a.id} style={{ display:"flex",alignItems:"center",gap:6,background:a.shipStatus==="출고완료"?"#F0FDF4":"#F9FAFB",border:`1px solid ${a.shipStatus==="출고완료"?"#BBF7D0":"#E5E7EB"}`,borderRadius:6,padding:"4px 10px" }}>
+                                  <span style={{ fontSize:12,fontWeight:700 }}>{a.name}</span>
+                                  <span style={{ fontSize:11,color:"#9CA3AF" }}>{a.dept}</span>
+                                  <button style={{ fontSize:11,padding:"2px 8px",border:"none",borderRadius:4,cursor:"pointer",fontFamily:"inherit",fontWeight:700,background:a.shipStatus==="출고완료"?"#059669":"#1A56DB",color:"#fff" }} onClick={()=>updateShip(a.id,a.shipStatus==="출고완료"?"출고예정":"출고완료")}>{a.shipStatus==="출고완료"?"완료":"예정"}</button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>}
+                        </div>
+                      );
+                    })()}
+                </div>
+              </div>}
+          </>
+        )}
+
+        {mainTab==="main"&&(
+          <>
+            <div style={{ fontSize:13,color:"#0369A1",marginBottom:14,background:"#EEF3FF",padding:"10px 14px",borderRadius:7,border:"1px solid #C7D7FB",lineHeight:1.6 }}>📦 <b>본품 출고 기준:</b> 신청일이 해당 달 <b>첫째주 화요일</b> 이내 → 당월 첫째주 금요일 출고 / 첫째주 화요일 <b>마감 이후</b> 신청 → <b>익월</b> 첫째주 금요일 출고</div>
+            {pickup.main.length===0?<SAEmpty>본품 출고 예정 내역이 없습니다.</SAEmpty>
+              :pickup.main.map((g,gi)=>{const allDone=g.apps.every(a=>a.shipStatus==="출고완료"),prods=sumProds(g.apps,"본품"),isSel=selectedKey==="main_"+gi;return(
+                <ShipPickupCard key={gi} allDone={allDone} isSelected={isSel} accentColor="#1A56DB"
+                  title={`📅 ${g.pickupLabel} 본품 출고 예정`} count={g.apps.length} prodCount={prods.length} totalQty={prods.reduce((s,p)=>s+p.qty,0)}
+                  onToggle={()=>setSelectedKey(isSel?null:"main_"+gi)} onBulk={()=>bulkShip(g.apps.map(a=>a.id),allDone?"출고예정":"출고완료")}>
+                  <ShipProdTable prods={prods} allDone={allDone} />
+                  <div style={{ marginTop:10 }}><div style={{ fontSize:11,color:"#9CA3AF",marginBottom:6 }}>출고 대상 신청자</div><div style={{ display:"flex",flexDirection:"column",gap:6 }}>{g.apps.map(a=><ShipPersonChip key={a.id} app={a} isBlue typeFilter="본품" />)}</div></div>
+                </ShipPickupCard>
+              );})}
+          </>
+        )}
+
+        {mainTab==="sample"&&(
+          <>
+            <div style={{ fontSize:13,color:"#166534",marginBottom:14,background:"#F0FDF4",padding:"10px 14px",borderRadius:7,border:"1px solid #BBF7D0",lineHeight:1.6 }}>🧪 <b>샘플 출고 기준:</b> 신청일이 해당 달 <b>10일 전 영업일</b> 이내 → 해당 달 10일 이후 담당자 안내</div>
+            {pickup.sample.length===0?<SAEmpty>샘플 출고 예정 내역이 없습니다.</SAEmpty>
+              :pickup.sample.map((g,gi)=>{const allDone=g.apps.every(a=>a.shipStatus==="출고완료"),prods=sumProds(g.apps,"샘플"),isSel=selectedKey==="sample_"+gi;return(
+                <ShipPickupCard key={gi} allDone={allDone} isSelected={isSel} accentColor="#059669"
+                  title={`🧪 ${g.label}`} count={g.apps.length} prodCount={prods.length} totalQty={prods.reduce((s,p)=>s+p.qty,0)}
+                  onToggle={()=>setSelectedKey(isSel?null:"sample_"+gi)} onBulk={()=>bulkShip(g.apps.map(a=>a.id),allDone?"출고예정":"출고완료")}>
+                  <ShipProdTable prods={prods} allDone={allDone} />
+                  <div style={{ marginTop:10 }}><div style={{ fontSize:11,color:"#9CA3AF",marginBottom:6 }}>출고 대상 신청자</div><div style={{ display:"flex",flexDirection:"column",gap:6 }}>{g.apps.map(a=><ShipPersonChip key={a.id} app={a} isBlue={false} typeFilter="샘플" />)}</div></div>
+                </ShipPickupCard>
+              );})}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════
+   공용 소형 컴포넌트
+════════════════════════════════════════════════════════ */
+function CopyBtn({ text }) {
+  const [copied, setCopied] = useState(false);
+  const copy = (e) => {
+    e.stopPropagation();
+    try {
+      navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
+    } catch {
+      // fallback
+      const el = document.createElement("textarea"); el.value = text;
+      document.body.appendChild(el); el.select(); document.execCommand("copy");
+      document.body.removeChild(el);
+      setCopied(true); setTimeout(() => setCopied(false), 2000);
+    }
+  };
+  return (
+    <button onClick={copy} style={{ padding:"3px 10px", border:`1.5px solid ${copied?"#059669":"#C7D7FB"}`, borderRadius:6, fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit", background:copied?"#F0FDF4":"#EEF3FF", color:copied?"#059669":"#1A56DB", transition:"all .2s" }}>
+      {copied ? "✓ 복사됨" : "복사"}
+    </button>
+  );
+}
+
+function SLabel({ children }) {
+  return <div style={{ fontSize:12,fontWeight:700,color:"#6B7280",textTransform:"uppercase",letterSpacing:"0.6px",marginBottom:14,display:"flex",alignItems:"center",gap:8 }}><span style={{ width:3,height:14,background:"#1A56DB",borderRadius:2,display:"inline-block" }}/>{children}</div>;
+}
+function SField({ label, required, error, children }) {
+  return <div style={{ display:"flex",flexDirection:"column",gap:5 }}><label style={{ fontSize:13,fontWeight:600,color:"#374151" }}>{label}{required&&<span style={{ color:"#DC2626" }}> *</span>}</label>{children}{error&&<div style={{ fontSize:12,color:"#DC2626" }}>{error}</div>}</div>;
+}
+function SErrMsg({ children }) {
+  return <div style={{ background:"#FEF2F2",color:"#DC2626",fontSize:13,padding:"8px 12px",borderRadius:6,marginBottom:10,fontWeight:500 }}>{children}</div>;
+}
+function SSumItem({ label, val, accent }) {
+  return <div style={{ display:"flex",flexDirection:"column",gap:2 }}><div style={{ fontSize:10,color:"#9CA3AF",textTransform:"uppercase" }}>{label}</div><div style={{ fontFamily:"monospace",fontWeight:700,fontSize:14,color:accent?"#1A56DB":"#111" }}>{val}</div></div>;
+}
+function SAEmpty({ children }) {
+  return <div style={{ textAlign:"center",padding:32,color:"#9CA3AF" }}>{children}</div>;
+}
+function DeptCard({ dept }) {
+  const [open, setOpen] = useState(false);
+  const prods = Object.entries(dept.products).sort(([,a],[,b])=>b.amount-a.amount);
+  return (
+    <div style={{ border:"1.5px solid #E5E7EB",borderRadius:10,overflow:"hidden" }}>
+      <div style={{ display:"flex",alignItems:"center",gap:12,padding:"14px 16px",cursor:"pointer",userSelect:"none" }} onClick={()=>setOpen(v=>!v)}>
+        <div style={{ width:36,height:36,borderRadius:8,background:"#EEF3FF",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0 }}>🏢</div>
+        <div style={{ flex:1 }}><div style={{ fontWeight:700,fontSize:15 }}>{dept.dept}</div><div style={{ fontSize:12,color:"#6B7280" }}>총 {dept.count}건 · {prods.length}종</div></div>
+        <div style={{ display:"flex",gap:16,flexShrink:0 }}>
+          <div style={{ textAlign:"center" }}><div style={{ fontSize:10,color:"#9CA3AF" }}>본품</div><div style={{ fontFamily:"monospace",fontWeight:700,fontSize:13,color:"#1A56DB" }}>{fmt(dept.totalMain)}</div></div>
+          <div style={{ textAlign:"center" }}><div style={{ fontSize:10,color:"#9CA3AF" }}>샘플</div><div style={{ fontFamily:"monospace",fontWeight:700,fontSize:13,color:"#059669" }}>{fmt(dept.totalSample)}</div></div>
+          <div style={{ textAlign:"center" }}><div style={{ fontSize:10,color:"#9CA3AF" }}>합계</div><div style={{ fontFamily:"monospace",fontWeight:800,fontSize:15 }}>{fmt(dept.total)}</div></div>
+        </div>
+        <span style={{ fontSize:12,color:"#9CA3AF",transform:open?"rotate(180deg)":"rotate(0deg)",display:"inline-block",transition:"transform .2s" }}>▼</span>
+      </div>
+      {open&&<div style={{ background:"#F9FAFB",borderTop:"1px solid #E5E7EB",padding:"12px 16px" }}>
+        <table style={{ width:"100%",borderCollapse:"collapse",fontSize:13 }}>
+          <thead><tr>{["제품명","수량","금액"].map(h=><th key={h} style={{ ...TH,padding:"6px 8px" }}>{h}</th>)}</tr></thead>
+          <tbody>{prods.map(([name,stat],i)=>{const isMain=name.startsWith("[본품]");return(<tr key={i}><td style={{ ...TD,padding:"7px 8px",fontWeight:600 }}><span style={{ fontSize:10,padding:"1px 6px",borderRadius:20,marginRight:6,fontWeight:700,background:isMain?"#EEF3FF":"#F0FDF4",color:isMain?"#1A56DB":"#059669" }}>{isMain?"본품":"샘플"}</span>{name.replace(/^\[본품\] |\[샘플\] /,"")}</td><td style={{ ...TD,padding:"7px 8px",fontFamily:"monospace",fontWeight:700 }}>{stat.qty.toLocaleString()}개</td><td style={{ ...TD,padding:"7px 8px",fontFamily:"monospace",fontWeight:700,color:isMain?"#1A56DB":"#059669" }}>{fmt(stat.amount)}</td></tr>);})}</tbody>
+        </table>
+      </div>}
+    </div>
+  );
+}
+function PersonCard({ person }) {
+  const [open, setOpen] = useState(false);
+  const prods = Object.entries(person.products).sort(([,a],[,b])=>b.amount-a.amount);
+  return (
+    <div style={{ border:"1.5px solid #E5E7EB",borderRadius:10,overflow:"hidden" }}>
+      <div style={{ display:"flex",alignItems:"center",gap:12,padding:"14px 16px",cursor:"pointer",userSelect:"none" }} onClick={()=>setOpen(v=>!v)}>
+        <div style={{ width:36,height:36,borderRadius:50,background:"#EEF3FF",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:15,color:"#1A56DB",flexShrink:0 }}>{person.name.charAt(0)}</div>
+        <div style={{ flex:1 }}><div style={{ fontWeight:700,fontSize:15 }}>{person.name} <span style={{ fontSize:12,color:"#9CA3AF",fontWeight:400 }}>{person.dept}</span></div><div style={{ fontSize:12,color:"#6B7280" }}>총 {person.count}건 · 마지막: {person.lastDate}</div></div>
+        <div style={{ textAlign:"right",flexShrink:0 }}><div style={{ fontFamily:"monospace",fontWeight:800,fontSize:16,color:"#1A56DB" }}>{fmt(person.total)}</div><div style={{ fontSize:11,color:"#9CA3AF" }}>본품 {fmt(person.totalMain)} / 샘플 {fmt(person.totalSample)}</div></div>
+        <span style={{ fontSize:12,color:"#9CA3AF",transform:open?"rotate(180deg)":"rotate(0deg)",display:"inline-block",transition:"transform .2s" }}>▼</span>
+      </div>
+      {open&&<div style={{ background:"#F9FAFB",borderTop:"1px solid #E5E7EB",padding:"12px 16px" }}>
+        <table style={{ width:"100%",borderCollapse:"collapse",fontSize:13 }}>
+          <thead><tr>{["제품명","수량","금액"].map(h=><th key={h} style={{ ...TH,padding:"6px 8px" }}>{h}</th>)}</tr></thead>
+          <tbody>{prods.map(([name,stat],i)=>{const isMain=name.startsWith("[본품]");return(<tr key={i}><td style={{ ...TD,padding:"7px 8px",fontWeight:600 }}><span style={{ fontSize:10,padding:"1px 6px",borderRadius:20,marginRight:6,fontWeight:700,background:isMain?"#EEF3FF":"#F0FDF4",color:isMain?"#1A56DB":"#059669" }}>{isMain?"본품":"샘플"}</span>{name.replace(/^\[본품\] |\[샘플\] /,"")}</td><td style={{ ...TD,padding:"7px 8px",fontFamily:"monospace" }}>{stat.qty.toLocaleString()}</td><td style={{ ...TD,padding:"7px 8px",fontFamily:"monospace",fontWeight:700,color:"#1A56DB" }}>{fmt(stat.amount)}</td></tr>);})}</tbody>
+        </table>
+      </div>}
+    </div>
+  );
+}
+function ShipProdTable({ prods, allDone }) {
+  return <table style={{ width:"100%",borderCollapse:"collapse",fontSize:13 }}><thead><tr>{["구분","제품명","수량","상태"].map(h=><th key={h} style={{ padding:"5px 8px",textAlign:"left",fontSize:11,fontWeight:700,color:"#9CA3AF",borderBottom:"1px solid #F3F4F6" }}>{h}</th>)}</tr></thead><tbody>{prods.map((p,i)=><tr key={i}><td style={{ padding:"7px 8px",borderBottom:"1px solid #F9FAFB" }}><span style={{ fontSize:10,padding:"1px 6px",borderRadius:20,fontWeight:700,background:p.type==="본품"?"#EEF3FF":"#F0FDF4",color:p.type==="본품"?"#1A56DB":"#059669" }}>{p.type}</span></td><td style={{ padding:"7px 8px",borderBottom:"1px solid #F9FAFB",fontWeight:600 }}>{p.name}</td><td style={{ padding:"7px 8px",borderBottom:"1px solid #F9FAFB",fontFamily:"monospace",fontWeight:700 }}>{p.qty.toLocaleString()}개</td><td style={{ padding:"7px 8px",borderBottom:"1px solid #F9FAFB" }}>{allDone?<span style={{ color:"#059669",fontWeight:700 }}>✅ 완료</span>:<span style={{ color:"#F59E0B" }}>⏳ 예정</span>}</td></tr>)}</tbody></table>;
+}
+function ShipPickupCard({ allDone, isSelected, accentColor, title, count, prodCount, totalQty, onToggle, onBulk, children }) {
+  return <div style={{ border:`1.5px solid ${isSelected?accentColor:allDone?"#BBF7D0":"#E5E7EB"}`,borderRadius:10,marginBottom:10,overflow:"hidden" }}><div onClick={onToggle} style={{ display:"flex",alignItems:"center",gap:12,padding:"14px 16px",cursor:"pointer",userSelect:"none",background:allDone?"#F0FDF4":isSelected?"#F0F4FF":"#F9FAFB",borderBottom:isSelected?"1px solid #E5E7EB":"none" }}><div style={{ flex:1 }}><div style={{ fontWeight:800,fontSize:15,color:isSelected?accentColor:"#111" }}>{title}</div><div style={{ fontSize:12,color:"#6B7280",marginTop:3 }}>신청 {count}건 · {prodCount}종 · 총 {totalQty.toLocaleString()}개</div></div><div style={{ display:"flex",gap:8,alignItems:"center" }}><span style={{ fontSize:12,fontWeight:700,color:allDone?"#059669":"#F59E0B" }}>{allDone?"✅ 완료":"⏳ 예정"}</span><button style={{ padding:"6px 14px",border:"none",borderRadius:7,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",background:allDone?"#059669":"#1A56DB",color:"#fff" }} onClick={e=>{e.stopPropagation();onBulk();}}>{allDone?"출고완료":"출고완료로 변경"}</button></div><span style={{ fontSize:12,color:"#9CA3AF",transform:isSelected?"rotate(180deg)":"rotate(0deg)",display:"inline-block",transition:"transform .2s" }}>▼</span></div>{isSelected&&<div style={{ padding:"12px 16px" }}>{children}</div>}</div>;
+}
+function ShipPersonChip({ app, isBlue, typeFilter }) {
+  const prods = [
+    ...(typeFilter !== "샘플" ? (app.mainProducts||[]).map(p=>({...p,type:"본품"})) : []),
+    ...(typeFilter !== "본품" ? (app.sampleProducts||[]).map(p=>({...p,type:"샘플"})) : []),
+  ];
+  const prodStr = prods.map(p => `${p.name} ${p.qty}개`).join(" · ");
+  return (
+    <div style={{ display:"flex",alignItems:"flex-start",gap:8,background:app.shipStatus==="출고완료"?"#F0FDF4":isBlue?"#EEF3FF":"#ECFDF5",border:`1px solid ${app.shipStatus==="출고완료"?"#BBF7D0":isBlue?"#C7D7FB":"#A7F3D0"}`,borderRadius:8,padding:"8px 12px",minWidth:0,flex:"0 0 auto",maxWidth:"100%" }}>
+      <span style={{ fontSize:11,color:app.shipStatus==="출고완료"?"#059669":"#F59E0B",fontWeight:700,flexShrink:0 }}>{app.shipStatus==="출고완료"?"✅":"⏳"}</span>
+      <div style={{ minWidth:0 }}>
+        <div style={{ fontWeight:700,fontSize:13 }}>{app.name} <span style={{ fontSize:11,color:"#9CA3AF",fontWeight:400 }}>{app.dept}</span></div>
+        {prodStr && <div style={{ fontSize:11,color:"#374151",marginTop:2,lineHeight:1.5 }}>{prodStr}</div>}
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════
+   앱 라우터
+════════════════════════════════════════════════════════ */
+export default function App() {
+  const [page,   setPage]   = useState("employee");
+  const [auth,   setAuth]   = useState(false);
+  const [notice, setNotice] = useState({ title: "제품 신청 안내", body: "본품: 매달 첫째주 화요일 마감 / 샘플: 매달 10일 전 영업일 마감", deadline: "" });
+
+  useEffect(() => {
+    const el = document.createElement("style"); el.textContent = GLOBAL_CSS; document.head.appendChild(el);
+    return () => document.head.removeChild(el);
+  }, []);
+
+  useEffect(() => { loadNotice().then(n => { if (n) setNotice(n); }); }, []);
+  useEffect(() => {
+    if (page === "employee") { loadNotice().then(n => { if (n) setNotice(n); }); }
+  }, [page]);
+
+  const logout = () => { localStorage.removeItem("admin_auto"); localStorage.removeItem("admin_pw"); setAuth(false); setPage("admin"); };
+
+  if (page === "ship") return <ShipPage onBack={() => setPage("admin")} />;
+  if (page === "admin") {
+    if (!auth) return <AdminLogin onLogin={() => setAuth(true)} />;
+    return <AdminDash onBack={() => setPage("employee")} onGoShip={() => setPage("ship")} onLogout={logout} />;
+  }
+  return <EmployeePage notice={notice} onAdmin={() => setPage("admin")} />;
+}
+
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
