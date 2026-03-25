@@ -93,6 +93,19 @@ async function saveNoticeDB(noticeData) {
   const { error } = await sb.from('settings').upsert({ key: 'notice', value: noticeData });
   if (error) throw error;
 }
+async function loadEmployees() {
+  const { data, error } = await sb.from('employees').select('*').order('name', { ascending: true });
+  if (error) { console.error(error); return []; }
+  return data || [];
+}
+async function addEmployee(emp) {
+  const { error } = await sb.from('employees').insert(emp);
+  if (error) throw error;
+}
+async function deleteEmployee(id) {
+  const { error } = await sb.from('employees').delete().eq('id', id);
+  if (error) throw error;
+}
 
 function getNthWeekday(y, m, dow, n) {
   const d = new Date(y, m, 1); let c = 0;
@@ -190,7 +203,29 @@ function EmployeePage({ notice, onAdmin }) {
   const [sampleUsed,  setSampleUsed]  = useState(0);
   const [blockMsg,    setBlockMsg]    = useState("");
   const [submitting,  setSubmitting]  = useState(false);
+  const [employees,   setEmployees]   = useState([]);
+  const [empError,    setEmpError]    = useState("");
+  const [myApps,      setMyApps]      = useState([]);
+  const [myAppsLoading, setMyAppsLoading] = useState(false);
+  const [showMyApps,  setShowMyApps]  = useState(false);
   const debRef = useRef(null);
+
+  // 직원 목록 로드
+  useEffect(() => { loadEmployees().then(setEmployees); }, []);
+
+  // 직원 검증
+  useEffect(() => {
+    if (!form.name.trim() || !form.dept) { setEmpError(""); return; }
+    const emp = employees.find(e => e.name === form.name.trim() && e.dept === form.dept);
+    if (!emp) { setEmpError("등록되지 않은 직원입니다."); return; }
+    const hireDate = new Date(emp.hire_date);
+    const available = new Date(hireDate); available.setMonth(available.getMonth() + 3);
+    if (new Date() < available) {
+      setEmpError(`입사 후 3개월 미만은 신청이 불가합니다. (신청 가능일: ${available.getFullYear()}년 ${available.getMonth()+1}월 ${available.getDate()}일)`);
+      return;
+    }
+    setEmpError("");
+  }, [form.name, form.dept, employees]);
 
   // 구매 이력 조회
   useEffect(() => {
@@ -267,6 +302,7 @@ function EmployeePage({ notice, onAdmin }) {
     }
     if (sampleUsed + sampleTotal > SAMPLE_MONTHLY_LIMIT)
       e.sampleLimit = `샘플 합계(${fmt(sampleTotal)})가 잔여 한도(${fmt(SAMPLE_MONTHLY_LIMIT - sampleUsed)})를 초과합니다.`;
+    if (empError) { e.emp = empError; }
     setErrors(e);
     if (Object.keys(e).length > 0) return;
 
@@ -406,9 +442,10 @@ function EmployeePage({ notice, onAdmin }) {
               {DEPT_LIST.map(d => <option key={d} value={d} style={{ color: "#111" }}>{d}</option>)}
             </select>
           </SField>
+          {empError && <div style={{ gridColumn:"span 2", background:"#FEF2F2", color:"#DC2626", fontSize:13, padding:"10px 14px", borderRadius:8, fontWeight:600 }}>🚫 {empError}</div>}
           <div style={{ gridColumn: "span 2" }}>
             <SField label="신청일자">
-              <input type="date" style={INP} value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
+              <DatePickerInput style={INP} value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
             </SField>
           </div>
         </div>
@@ -595,6 +632,51 @@ function EmployeePage({ notice, onAdmin }) {
           </button>
         </div>
       </div>
+
+      {/* 내 신청 내역 */}
+      {form.name.trim() && form.dept && (
+        <div style={CARD}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: showMyApps ? 14 : 0 }}>
+            <SLabel>📋 내 신청 내역</SLabel>
+            <button style={BS} onClick={async () => {
+              if (!showMyApps) {
+                setMyAppsLoading(true);
+                const all = await loadApplications();
+                setMyApps(all.filter(a => a.name === form.name.trim() && a.dept === form.dept));
+                setMyAppsLoading(false);
+              }
+              setShowMyApps(v => !v);
+            }}>
+              {showMyApps ? "닫기" : "조회하기"}
+            </button>
+          </div>
+          {showMyApps && (
+            myAppsLoading
+              ? <div style={{ textAlign:"center", padding:20, color:"#9CA3AF" }}>조회 중...</div>
+              : myApps.length === 0
+                ? <div style={{ textAlign:"center", padding:20, color:"#9CA3AF" }}>신청 내역이 없습니다.</div>
+                : <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                    {myApps.map(a => (
+                      <div key={a.id} style={{ border:"1px solid #E5E7EB", borderRadius:8, padding:"12px 14px" }}>
+                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+                          <span style={{ fontFamily:"monospace", fontSize:12, color:"#6366F1" }}>{a.id}</span>
+                          <span style={{ fontSize:12, fontWeight:700, padding:"2px 8px", borderRadius:20, background:(STATUS_COLOR[a.status]||"#aaa")+"22", color:STATUS_COLOR[a.status]||"#aaa" }}>{a.status}</span>
+                        </div>
+                        <div style={{ display:"flex", justifyContent:"space-between", fontSize:13 }}>
+                          <span style={{ color:"#6B7280" }}>{a.date} · {a.pay}</span>
+                          <span style={{ fontWeight:700, color:"#1A56DB" }}>{fmt(a.total||0)}</span>
+                        </div>
+                        {(a.mainProducts?.length > 0 || a.sampleProducts?.length > 0) && (
+                          <div style={{ marginTop:6, fontSize:12, color:"#6B7280" }}>
+                            {[...(a.mainProducts||[]).map(p=>`[본품] ${p.name}`), ...(a.sampleProducts||[]).map(p=>`[샘플] ${p.name} ${p.qty}개`)].join(" · ")}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -666,13 +748,15 @@ function AdminDash({ onBack, onGoShip, onLogout }) {
   const [dateFrom,     setDateFrom]     = useState("");
   const [dateTo,       setDateTo]       = useState("");
   const [personSearch, setPersonSearch] = useState("");
+  const [employees,    setEmployees]    = useState([]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [a, n] = await Promise.all([loadApplications(), loadNotice()]);
+      const [a, n, emps] = await Promise.all([loadApplications(), loadNotice(), loadEmployees()]);
       setApps(a || []);
       setNotice(n || { title: "제품 신청 안내", body: "본품: 매달 첫째주 화요일 마감 / 샘플: 매달 10일 전 영업일 마감", deadline: "" });
+      setEmployees(emps || []);
     } catch(e) { console.error(e); }
     finally { setLoading(false); }
   }, []);
@@ -687,9 +771,10 @@ function AdminDash({ onBack, onGoShip, onLogout }) {
   const deleteApp    = async (id) => { if(!window.confirm("삭제할까요?"))return; try { await removeApplication(id); } catch(e){ console.error(e); } const u=apps.filter(a=>a.id!==id); setApps(u); if(selected?.id===id)setSelected(null); };
 
   const exportCSV = () => {
+    const toExport = checkedIds.size > 0 ? apps.filter(a => checkedIds.has(a.id)) : displayed;
     const headers = ["신청번호","이름","부서","신청일자","접수시각","결제","상태","제품구분","제품명","단가","수량","소계","본품합계","샘플합계","최종합계"];
     const rows = [];
-    apps.forEach(a => {
+    toExport.forEach(a => {
       const all=[...(a.mainProducts||[]).map(p=>({...p,type:"본품"})),...(a.sampleProducts||[]).map(p=>({...p,type:"샘플"}))];
       if(!all.length){rows.push({신청번호:a.id,이름:a.name,부서:a.dept||"",신청일자:a.date,접수시각:a.submittedAt,결제:a.pay,상태:a.status,제품구분:"",제품명:"",단가:"",수량:"",소계:"",본품합계:a.totalMain||0,샘플합계:a.totalSample||0,최종합계:a.total||0});}
       else all.forEach((p,i)=>rows.push({신청번호:i===0?a.id:"",이름:i===0?a.name:"",부서:i===0?(a.dept||""):"",신청일자:i===0?a.date:"",접수시각:i===0?a.submittedAt:"",결제:i===0?a.pay:"",상태:i===0?a.status:"",제품구분:p.type,제품명:p.name,단가:p.price,수량:p.qty,소계:p.price*p.qty,본품합계:i===0?(a.totalMain||0):"",샘플합계:i===0?(a.totalSample||0):"",최종합계:i===0?(a.total||0):""}));
@@ -739,7 +824,9 @@ function AdminDash({ onBack, onGoShip, onLogout }) {
           <div><div style={{ fontWeight:800,fontSize:18 }}>관리자 대시보드</div><div style={{ fontSize:12,color:"#6B7280" }}>제품 신청 관리 시스템</div></div>
         </div>
         <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
-          <button style={{ ...BS,background:"#F0FDF4",color:"#059669",borderColor:"#BBF7D0" }} onClick={exportCSV}>📥 CSV</button>
+          <button style={{ ...BS,background:"#F0FDF4",color:"#059669",borderColor:"#BBF7D0" }} onClick={exportCSV}>
+            📥 CSV {checkedIds.size > 0 ? `(선택 ${checkedIds.size}건)` : `(필터 ${displayed.length}건)`}
+          </button>
           <button style={{ ...BS,background:"#FFF7ED",color:"#C2410C",borderColor:"#FED7AA" }} onClick={onGoShip}>🚚 출고 관리</button>
           <button style={BS} onClick={loadData}>🔄 새로고침</button>
           <button style={BO} onClick={onBack}>← 신청서</button>
@@ -785,7 +872,7 @@ function AdminDash({ onBack, onGoShip, onLogout }) {
       {/* 탭 */}
       <div style={{ background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,padding:"18px 16px",boxShadow:"0 1px 3px rgba(0,0,0,0.04)" }}>
         <div style={{ display:"flex",borderBottom:"1px solid #E5E7EB",marginBottom:16,overflowX:"auto" }}>
-          {[["list","📋 신청 목록"],["stats","📊 통계"],["person","👤 신청자별 통계"]].map(([k,l]) => (
+          {[["list","📋 신청 목록"],["stats","📊 통계"],["person","👤 신청자별 통계"],["employees","👥 직원 관리"]].map(([k,l]) => (
             <button key={k} onClick={()=>setTab(k)} style={{ padding:"10px 16px",border:"none",background:"transparent",fontFamily:"inherit",fontWeight:tab===k?700:500,fontSize:14,color:tab===k?"#1A56DB":"#6B7280",borderBottom:tab===k?"2px solid #1A56DB":"2px solid transparent",cursor:"pointer",whiteSpace:"nowrap" }}>{l}</button>
           ))}
         </div>
@@ -874,12 +961,12 @@ function AdminDash({ onBack, onGoShip, onLogout }) {
                 <div style={{ display:"flex",gap:10,alignItems:"center",flexWrap:"wrap" }}>
                   <div style={{ display:"flex",alignItems:"center",gap:6 }}>
                     <span style={{ fontSize:12,color:"#6B7280" }}>시작</span>
-                    <input type="date" style={{ ...INP,width:"auto",fontSize:13,padding:"7px 10px" }} value={dateFrom} max={dateTo||today()} onChange={e=>{if(dateTo&&(new Date(dateTo)-new Date(e.target.value))/86400000>365){alert("최대 1년까지 선택 가능합니다.");return;}setDateFrom(e.target.value);}} />
+                    <DatePickerInput style={{ ...INP,width:"auto",fontSize:13,padding:"7px 10px" }} value={dateFrom} onChange={e=>{if(dateTo&&(new Date(dateTo)-new Date(e.target.value))/86400000>365){alert("최대 1년까지 선택 가능합니다.");return;}setDateFrom(e.target.value);}} />
                   </div>
                   <span style={{ color:"#9CA3AF" }}>~</span>
                   <div style={{ display:"flex",alignItems:"center",gap:6 }}>
                     <span style={{ fontSize:12,color:"#6B7280" }}>종료</span>
-                    <input type="date" style={{ ...INP,width:"auto",fontSize:13,padding:"7px 10px" }} value={dateTo} min={dateFrom} max={today()} onChange={e=>{if(dateFrom&&(new Date(e.target.value)-new Date(dateFrom))/86400000>365){alert("최대 1년까지 선택 가능합니다.");return;}setDateTo(e.target.value);}} />
+                    <DatePickerInput style={{ ...INP,width:"auto",fontSize:13,padding:"7px 10px" }} value={dateTo} onChange={e=>{if(dateFrom&&(new Date(e.target.value)-new Date(dateFrom))/86400000>365){alert("최대 1년까지 선택 가능합니다.");return;}setDateTo(e.target.value);}} />
                   </div>
                   <button style={{ ...BT,color:"#DC2626",borderColor:"#FECACA" }} onClick={()=>{setDateFrom("");setDateTo("");}}>초기화</button>
                 </div>
@@ -913,6 +1000,11 @@ function AdminDash({ onBack, onGoShip, onLogout }) {
             {personStats.length===0?<SAEmpty>{personSearch?`"${personSearch}" 검색 결과 없음`:"신청 내역이 없습니다."}</SAEmpty>
               :<div style={{ display:"flex",flexDirection:"column",gap:10 }}>{personStats.map((p,i)=><PersonCard key={i} person={p}/>)}</div>}
           </>
+        )}
+
+        {/* 직원 관리 */}
+        {tab==="employees" && (
+          <EmployeeManager employees={employees} onReload={() => loadEmployees().then(setEmployees)} />
         )}
       </div>
     </div>
@@ -1172,8 +1264,125 @@ function ShipPage({ onBack }) {
 }
 
 /* ════════════════════════════════════════════════════════
+   직원 관리 컴포넌트
+════════════════════════════════════════════════════════ */
+function EmployeeManager({ employees, onReload }) {
+  const [form, setForm] = useState({ name: "", dept: "", hire_date: "" });
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+
+  const handleAdd = async () => {
+    if (!form.name.trim()) { setErr("이름을 입력해주세요"); return; }
+    if (!form.dept) { setErr("부서를 선택해주세요"); return; }
+    if (!form.hire_date) { setErr("입사일을 입력해주세요"); return; }
+    setLoading(true);
+    try {
+      await addEmployee({ name: form.name.trim(), dept: form.dept, hire_date: form.hire_date });
+      setForm({ name: "", dept: "", hire_date: "" });
+      setErr("");
+      onReload();
+    } catch(e) { setErr("저장 중 오류가 발생했습니다."); }
+    finally { setLoading(false); }
+  };
+
+  const handleDelete = async (id, name) => {
+    if (!window.confirm(`"${name}" 직원을 삭제할까요?`)) return;
+    try { await deleteEmployee(id); onReload(); }
+    catch(e) { alert("삭제 중 오류가 발생했습니다."); }
+  };
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+      {/* 직원 추가 폼 */}
+      <div style={{ background:"#F9FAFB", border:"1px solid #E5E7EB", borderRadius:10, padding:"16px" }}>
+        <div style={{ fontWeight:700, fontSize:14, marginBottom:12 }}>➕ 직원 추가</div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr auto", gap:8, alignItems:"end" }}>
+          <SField label="이름" required>
+            <input style={INP} placeholder="홍길동" value={form.name} onChange={e => setForm(f=>({...f, name:e.target.value}))} />
+          </SField>
+          <SField label="부서" required>
+            <select style={{ ...INP, color: form.dept ? "#111" : "#9CA3AF" }} value={form.dept} onChange={e => setForm(f=>({...f, dept:e.target.value}))}>
+              <option value="" disabled>부서 선택</option>
+              {DEPT_LIST.map(d => <option key={d} value={d} style={{ color:"#111" }}>{d}</option>)}
+            </select>
+          </SField>
+          <SField label="입사일" required>
+            <input type="date" style={INP} value={form.hire_date} onChange={e => setForm(f=>({...f, hire_date:e.target.value}))} />
+          </SField>
+          <button style={{ ...BP, height:42, whiteSpace:"nowrap" }} onClick={handleAdd} disabled={loading}>
+            {loading ? "저장 중..." : "추가"}
+          </button>
+        </div>
+        {err && <div style={{ marginTop:8, color:"#DC2626", fontSize:13 }}>{err}</div>}
+      </div>
+
+      {/* 직원 목록 */}
+      <div>
+        <div style={{ fontWeight:700, fontSize:14, marginBottom:8 }}>직원 목록 ({employees.length}명)</div>
+        {employees.length === 0
+          ? <div style={{ textAlign:"center", padding:32, color:"#9CA3AF" }}>등록된 직원이 없습니다.</div>
+          : <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
+              <thead>
+                <tr style={{ background:"#F9FAFB" }}>
+                  {["이름","부서","입사일","신청 가능일",""].map(h => <th key={h} style={TH}>{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {employees.map(emp => {
+                  const hire = new Date(emp.hire_date);
+                  const avail = new Date(hire); avail.setMonth(avail.getMonth() + 3);
+                  const canApply = new Date() >= avail;
+                  return (
+                    <tr key={emp.id}>
+                      <td style={{ ...TD, fontWeight:600 }}>{emp.name}</td>
+                      <td style={TD}>{emp.dept}</td>
+                      <td style={{ ...TD, fontFamily:"monospace" }}>{emp.hire_date}</td>
+                      <td style={TD}>
+                        <span style={{ color: canApply ? "#059669" : "#DC2626", fontWeight:600 }}>
+                          {canApply ? "✅ 가능" : `${avail.getFullYear()}.${avail.getMonth()+1}.${avail.getDate()} 부터`}
+                        </span>
+                      </td>
+                      <td style={TD}>
+                        <button style={{ ...BT, color:"#DC2626", borderColor:"#FECACA" }} onClick={() => handleDelete(emp.id, emp.name)}>삭제</button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+        }
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════
    공용 소형 컴포넌트
 ════════════════════════════════════════════════════════ */
+function DatePickerInput({ value, onChange, style }) {
+  const ref = useRef(null);
+  const formatted = value
+    ? (() => { const d = new Date(value + 'T00:00:00'); return `${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일`; })()
+    : "날짜 선택";
+  return (
+    <div style={{ position:"relative" }}>
+      <div
+        style={{ ...style, cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center", userSelect:"none" }}
+        onClick={() => { try { ref.current.showPicker(); } catch { ref.current.click(); } }}
+      >
+        <span style={{ color: value ? "#111" : "#9CA3AF" }}>{formatted}</span>
+        <span style={{ fontSize:16 }}>📅</span>
+      </div>
+      <input
+        ref={ref}
+        type="date"
+        value={value}
+        onChange={onChange}
+        style={{ position:"absolute", top:0, left:0, width:"100%", height:"100%", opacity:0, cursor:"pointer", pointerEvents:"none" }}
+      />
+    </div>
+  );
+}
 function CopyBtn({ text }) {
   const [copied, setCopied] = useState(false);
   const copy = (e) => {
