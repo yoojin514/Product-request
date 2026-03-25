@@ -8,6 +8,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
@@ -1270,6 +1271,68 @@ function EmployeeManager({ employees, onReload }) {
   const [form, setForm] = useState({ name: "", dept: "", hire_date: "" });
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+  const [xlsxPreview, setXlsxPreview] = useState(null);
+  const [xlsxLoading, setXlsxLoading] = useState(false);
+  const fileRef = useRef(null);
+
+  const downloadTemplate = () => {
+    const ws = XLSX.utils.aoa_to_sheet([
+      ['이름','부서','입사일'],
+      ['홍길동','영업부','2024-01-15'],
+      ['김철수','디자인','2023-06-20'],
+    ]);
+    ws['!cols'] = [{wch:12},{wch:16},{wch:14}];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '직원목록');
+    XLSX.writeFile(wb, '직원목록_양식.xlsx');
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const wb = XLSX.read(evt.target.result, { type:'binary', cellDates:true });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const raw = XLSX.utils.sheet_to_json(ws, { header:1 });
+        const headers = (raw[0]||[]).map(h => String(h).trim());
+        const ni = headers.findIndex(h=>h==='이름');
+        const di = headers.findIndex(h=>h==='부서');
+        const hi = headers.findIndex(h=>h==='입사일');
+        if (ni===-1||di===-1||hi===-1) { alert('열 이름이 올바르지 않습니다.\n필수 열: 이름, 부서, 입사일'); return; }
+        const rows=[]; const errors=[];
+        raw.slice(1).forEach((row,i)=>{
+          if(!row||row.every(c=>!c)) return;
+          const name=String(row[ni]||'').trim();
+          const dept=String(row[di]||'').trim();
+          let hd=row[hi];
+          if(hd instanceof Date) hd=hd.toISOString().split('T')[0];
+          else if(typeof hd==='number'){const d=XLSX.SSF.parse_date_code(hd);hd=`${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`;}
+          else hd=String(hd||'').trim();
+          if(!name){errors.push(`${i+2}행: 이름 없음`);return;}
+          if(!DEPT_LIST.includes(dept)){errors.push(`${i+2}행: "${dept}" 부서 없음 (${name})`);return;}
+          if(!hd||!/^\d{4}-\d{2}-\d{2}$/.test(hd)){errors.push(`${i+2}행: 날짜 형식 오류 (${name})`);return;}
+          rows.push({name,dept,hire_date:hd});
+        });
+        setXlsxPreview({rows,errors});
+      } catch(err){ alert('파일 읽기 오류: '+err.message); }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value='';
+  };
+
+  const handleBulkUpload = async () => {
+    if(!xlsxPreview?.rows?.length) return;
+    setXlsxLoading(true);
+    try {
+      await Promise.all(xlsxPreview.rows.map(r=>addEmployee(r)));
+      alert(`${xlsxPreview.rows.length}명 업로드 완료!`);
+      setXlsxPreview(null);
+      onReload();
+    } catch(e){ alert('업로드 중 오류가 발생했습니다.'); }
+    finally{ setXlsxLoading(false); }
+  };
 
   const handleAdd = async () => {
     if (!form.name.trim()) { setErr("이름을 입력해주세요"); return; }
@@ -1293,9 +1356,48 @@ function EmployeeManager({ employees, onReload }) {
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+      {/* 엑셀 업로드 */}
+      <div style={{ background:"#F0FDF4", border:"1px solid #BBF7D0", borderRadius:10, padding:"16px" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+          <div style={{ fontWeight:700, fontSize:14 }}>📎 엑셀/CSV 일괄 업로드</div>
+          <div style={{ display:"flex", gap:8 }}>
+            <button style={{ ...BS, background:"#fff", color:"#059669", borderColor:"#BBF7D0" }} onClick={downloadTemplate}>⬇️ 양식 다운로드</button>
+            <button style={{ ...BS, background:"#059669", color:"#fff", borderColor:"#059669" }} onClick={()=>fileRef.current?.click()}>📂 파일 선택</button>
+          </div>
+        </div>
+        <div style={{ fontSize:12, color:"#6B7280" }}>열 이름: <b>이름</b>, <b>부서</b>, <b>입사일</b> (YYYY-MM-DD) — 양식 다운로드 후 작성해주세요</div>
+        <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display:"none" }} onChange={handleFileUpload} />
+
+        {xlsxPreview && (
+          <div style={{ marginTop:12 }}>
+            {xlsxPreview.errors.length > 0 && (
+              <div style={{ background:"#FEF2F2", border:"1px solid #FECACA", borderRadius:8, padding:"10px 14px", marginBottom:10 }}>
+                <div style={{ fontWeight:700, fontSize:13, color:"#DC2626", marginBottom:4 }}>⚠️ 오류 항목 ({xlsxPreview.errors.length}건) — 제외 후 업로드됩니다</div>
+                {xlsxPreview.errors.map((e,i)=><div key={i} style={{ fontSize:12, color:"#DC2626" }}>• {e}</div>)}
+              </div>
+            )}
+            {xlsxPreview.rows.length > 0 && (
+              <>
+                <div style={{ fontWeight:700, fontSize:13, marginBottom:6 }}>✅ 업로드 예정 ({xlsxPreview.rows.length}명)</div>
+                <div style={{ maxHeight:200, overflowY:"auto", border:"1px solid #E5E7EB", borderRadius:8, marginBottom:10 }}>
+                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
+                    <thead><tr style={{ background:"#F9FAFB" }}>{["이름","부서","입사일"].map(h=><th key={h} style={TH}>{h}</th>)}</tr></thead>
+                    <tbody>{xlsxPreview.rows.map((r,i)=><tr key={i}><td style={{ ...TD, fontWeight:600 }}>{r.name}</td><td style={TD}>{r.dept}</td><td style={{ ...TD, fontFamily:"monospace" }}>{r.hire_date}</td></tr>)}</tbody>
+                  </table>
+                </div>
+                <div style={{ display:"flex", gap:8 }}>
+                  <button style={{ ...BP, flex:1 }} onClick={handleBulkUpload} disabled={xlsxLoading}>{xlsxLoading?"업로드 중...":"✅ 업로드 확인"}</button>
+                  <button style={{ ...BO }} onClick={()=>setXlsxPreview(null)}>취소</button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* 직원 추가 폼 */}
       <div style={{ background:"#F9FAFB", border:"1px solid #E5E7EB", borderRadius:10, padding:"16px" }}>
-        <div style={{ fontWeight:700, fontSize:14, marginBottom:12 }}>➕ 직원 추가</div>
+        <div style={{ fontWeight:700, fontSize:14, marginBottom:12 }}>➕ 직원 개별 추가</div>
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr auto", gap:8, alignItems:"end" }}>
           <SField label="이름" required>
             <input style={INP} placeholder="홍길동" value={form.name} onChange={e => setForm(f=>({...f, name:e.target.value}))} />
