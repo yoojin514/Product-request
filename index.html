@@ -137,6 +137,10 @@ async function loadAccessLogs() {
   if(error){ console.error(error); return []; }
   return data||[];
 }
+async function updateEmployee(id, name, dept, hire_date) {
+  const { error } = await sb.from('employees').update({ name, dept, hire_date }).eq('id', id);
+  if (error) throw error;
+}
 async function updateEmpPin(id, pin) {
   const { error } = await sb.from('employees').update({ pin }).eq('id',id);
   if(error) throw error;
@@ -242,7 +246,7 @@ function Watermark({ name, dept }) {
 /* ════════════════════════════════════════════════════════
    직원 로그인
 ════════════════════════════════════════════════════════ */
-function EmployeeLogin({ onLogin }) {
+function EmployeeLogin({ onLogin, onAdminBypass }) {
   const [name,    setName]    = useState('');
   const [dept,    setDept]    = useState('');
   const [pin,     setPin]     = useState('');
@@ -295,6 +299,9 @@ function EmployeeLogin({ onLogin }) {
           <button style={{ ...BP,marginTop:4 }} onClick={handleLogin} disabled={loading}>{loading?'확인 중...':'로그인'}</button>
         </div>
         <div style={{ marginTop:16,textAlign:'center',fontSize:12,color:'#9CA3AF' }}>PIN을 모르시면 관리자에게 문의해주세요</div>
+        {onAdminBypass && (
+          <button style={{ marginTop:10,width:'100%',padding:'10px',border:'1px solid #E5E7EB',borderRadius:8,background:'#F9FAFB',color:'#6B7280',fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:FF }} onClick={onAdminBypass}>⚙️ 관리자 페이지로 이동</button>
+        )}
       </div>
     </div>
   );
@@ -323,7 +330,26 @@ function EmployeePage({ notice, onAdmin, empAuth, onEmpLogout }) {
   const [empError,    setEmpError]    = useState("");
   const [myApps,      setMyApps]      = useState([]);
   const [myAppsLoading, setMyAppsLoading] = useState(false);
+  const [pinModal,    setPinModal]    = useState(false);
+  const [pinForm,     setPinForm]     = useState({ cur:'', next:'', confirm:'' });
+  const [pinMsg,      setPinMsg]      = useState('');
+  const [pinSaving,   setPinSaving]   = useState(false);
   const debRef = useRef(null);
+
+  const handlePinChange = async () => {
+    if(!pinForm.cur||!pinForm.next||!pinForm.confirm){ setPinMsg('모든 항목을 입력해주세요.'); return; }
+    if(pinForm.next.length < 4){ setPinMsg('PIN은 4자리 이상이어야 합니다.'); return; }
+    if(pinForm.next !== pinForm.confirm){ setPinMsg('새 PIN이 서로 일치하지 않습니다.'); return; }
+    setPinSaving(true); setPinMsg('');
+    try {
+      const emp = await verifyEmployee(empAuth.name, empAuth.dept, pinForm.cur);
+      if(!emp){ setPinMsg('현재 PIN이 올바르지 않습니다.'); setPinSaving(false); return; }
+      await updateEmpPin(empAuth.id, pinForm.next);
+      setPinModal(false); setPinForm({ cur:'', next:'', confirm:'' });
+      alert('PIN이 변경되었습니다.');
+    } catch { setPinMsg('변경 중 오류가 발생했습니다.'); }
+    setPinSaving(false);
+  };
 
   // 직원 목록 로드
   useEffect(() => { loadEmployees().then(setEmployees); }, []);
@@ -515,6 +541,32 @@ function EmployeePage({ notice, onAdmin, empAuth, onEmpLogout }) {
   return (
     <div style={{ fontFamily: FF, maxWidth: 720, margin: "0 auto", padding: "24px 14px 60px", display: "flex", flexDirection: "column", gap: 14 }}>
       {empAuth && <Watermark name={empAuth.name} dept={empAuth.dept} />}
+
+      {/* PIN 변경 모달 */}
+      {pinModal && (
+        <div style={{ position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:10000,display:'flex',alignItems:'center',justifyContent:'center',padding:16 }}>
+          <div style={{ background:'#fff',borderRadius:14,padding:'28px 24px',width:'100%',maxWidth:360,boxShadow:'0 8px 32px rgba(0,0,0,0.18)' }}>
+            <div style={{ fontWeight:800,fontSize:17,marginBottom:4 }}>🔑 PIN 변경</div>
+            <div style={{ fontSize:13,color:'#6B7280',marginBottom:20 }}>현재 PIN을 확인 후 새 PIN으로 변경합니다.</div>
+            <div style={{ display:'flex',flexDirection:'column',gap:12 }}>
+              {[['cur','현재 PIN','현재 PIN 입력'],['next','새 PIN','4자리 이상'],['confirm','새 PIN 확인','새 PIN 재입력']].map(([k,label,ph])=>(
+                <div key={k}>
+                  <div style={{ fontSize:12,fontWeight:600,color:'#374151',marginBottom:4 }}>{label}</div>
+                  <input type="password" style={INP} placeholder={ph} value={pinForm[k]}
+                    onChange={e=>setPinForm(f=>({...f,[k]:e.target.value}))}
+                    onKeyDown={e=>e.key==='Enter'&&handlePinChange()} maxLength={20} />
+                </div>
+              ))}
+              {pinMsg && <div style={{ background:'#FEF2F2',border:'1px solid #FECACA',borderRadius:7,padding:'9px 12px',fontSize:13,color:'#DC2626' }}>{pinMsg}</div>}
+            </div>
+            <div style={{ display:'flex',gap:8,marginTop:20 }}>
+              <button style={{ ...BP,flex:1 }} onClick={handlePinChange} disabled={pinSaving}>{pinSaving?'변경 중...':'변경 완료'}</button>
+              <button style={{ ...BS,flex:1 }} onClick={()=>{ setPinModal(false); setPinForm({cur:'',next:'',confirm:''}); setPinMsg(''); }}>취소</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 헤더 버튼 */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         {empAuth
@@ -522,6 +574,7 @@ function EmployeePage({ notice, onAdmin, empAuth, onEmpLogout }) {
           : <div />
         }
         <div style={{ display:"flex", gap:8 }}>
+          {empAuth && <button style={{ ...BS,background:'#F0FDF4',color:'#059669',borderColor:'#BBF7D0' }} onClick={()=>setPinModal(true)}>🔑 PIN 변경</button>}
           {empAuth && <button style={{ ...BS,background:'#FEF2F2',color:'#DC2626',borderColor:'#FECACA' }} onClick={onEmpLogout}>로그아웃</button>}
           <button style={{ ...BS, padding: "8px 14px" }} onClick={onAdmin}>⚙️ 관리자 페이지</button>
         </div>
@@ -744,9 +797,19 @@ function EmployeePage({ notice, onAdmin, empAuth, onEmpLogout }) {
               <span style={{ fontSize: 14, fontWeight: 700 }}>{COMPANY_BANK.holder}</span>
             </div>
             <div style={{ fontSize: 12, color: "#1A56DB", opacity: 0.8, marginBottom: 8 }}>📌 위 계좌로 입금 후 신청서를 제출해주세요.</div>
-            <div style={{ background: "#1A56DB", borderRadius: 8, padding: "12px 16px", display:"flex", alignItems:"center", gap:8 }}>
-              <span style={{ fontSize: 14, color: "#fff", fontWeight: 700 }}>💳 신청서 제출 후 담당자가 금액을 안내해 드립니다.</span>
-            </div>
+            {(mainBase + sampleTotal) > 0 && (
+              <div style={{ background: "#1A56DB", borderRadius: 8, padding: "12px 16px" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: mainCount > 0 && sampleCount > 0 ? 6 : 0 }}>
+                  <span style={{ fontSize: 13, color: "#fff", fontWeight: 700 }}>🏦 입금 예정 금액</span>
+                  <span style={{ fontSize: 17, color: "#fff", fontWeight: 800 }}>{(mainBase + sampleTotal).toLocaleString()}원</span>
+                </div>
+                {mainCount > 0 && sampleCount > 0 && (
+                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.8)", textAlign:"right" }}>
+                    본품 {mainBase.toLocaleString()}원 + 샘플 {sampleTotal.toLocaleString()}원
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
         {form.pay === "카드결제" && (
@@ -773,9 +836,18 @@ function EmployeePage({ notice, onAdmin, empAuth, onEmpLogout }) {
                   onChange={e => { const r = e.target.value.replace(/\D/g,"").slice(0,4); setForm(f => ({ ...f, cardExpiry: r.length > 2 ? r.slice(0,2)+"/"+r.slice(2) : r })); }} />
               </SField>
             </div>
-            <div style={{ marginTop: 12, background: "#6366F1", borderRadius: 8, padding: "12px 16px", display:"flex", alignItems:"center", gap:8 }}>
-              <span style={{ fontSize: 14, color: "#fff", fontWeight: 700 }}>💳 신청서 제출 후 담당자가 결제 금액을 안내해 드립니다.</span>
-            </div>
+            {(mainBase + sampleTotal) > 0 && (
+              <div style={{ marginTop: 12, background: "#6366F1", borderRadius: 8, padding: "12px 16px" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: 6 }}>
+                  <span style={{ fontSize: 13, color: "#fff", fontWeight: 700 }}>💳 결제 예정 금액</span>
+                  <span style={{ fontSize: 17, color: "#fff", fontWeight: 800 }}>{(mainBase + mainVat + sampleTotal).toLocaleString()}원</span>
+                </div>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.85)", textAlign:"right", lineHeight: 1.7 }}>
+                  {mainCount > 0 && <div>본품 {mainBase.toLocaleString()}원 + 부가세 {mainVat.toLocaleString()}원</div>}
+                  {sampleCount > 0 && <div>샘플 {sampleTotal.toLocaleString()}원</div>}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -850,11 +922,68 @@ function AdminLogin({ onLogin }) {
 /* ════════════════════════════════════════════════════════
    관리자 대시보드
 ════════════════════════════════════════════════════════ */
+const SETUP_SQL = `-- 1. 직원 PIN 컬럼 추가
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS pin text DEFAULT '0000';
+
+-- 2. 세션 테이블 (동시 접속 제한)
+CREATE TABLE IF NOT EXISTS sessions (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  employee_id int REFERENCES employees(id) ON DELETE CASCADE,
+  employee_name text,
+  employee_dept text,
+  token text UNIQUE NOT NULL,
+  ip text,
+  user_agent text,
+  created_at timestamptz DEFAULT now()
+);
+
+-- 3. 접속 로그 테이블
+CREATE TABLE IF NOT EXISTS access_logs (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  employee_name text,
+  employee_dept text,
+  action text,
+  ip text,
+  user_agent text,
+  created_at timestamptz DEFAULT now()
+);`;
+
+function DbSetupBanner({ onDismiss }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => { navigator.clipboard.writeText(SETUP_SQL).then(()=>{ setCopied(true); setTimeout(()=>setCopied(false),2000); }); };
+  const supabaseUrl = 'https://supabase.com/dashboard/project/vsqfnohvkhgpzdvfmqqv/sql/new';
+  return (
+    <div style={{ background:'#FFFBEB',border:'1.5px solid #FCD34D',borderRadius:12,padding:'18px 18px 14px',marginBottom:14 }}>
+      <div style={{ display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:10 }}>
+        <div>
+          <div style={{ fontWeight:700,fontSize:14,color:'#92400E',marginBottom:3 }}>⚠️ DB 초기 설정이 필요합니다</div>
+          <div style={{ fontSize:12,color:'#78350F' }}>세션 관리·접속 로그 기능을 사용하려면 Supabase에 테이블을 추가해야 합니다. (최초 1회)</div>
+        </div>
+        <button style={{ ...BT,fontSize:13,color:'#9CA3AF' }} onClick={onDismiss}>✕ 닫기</button>
+      </div>
+      <div style={{ background:'#1E1E1E',borderRadius:8,padding:'12px 14px',marginBottom:10,overflowX:'auto' }}>
+        <pre style={{ margin:0,fontSize:11,color:'#D4D4D4',fontFamily:'monospace',lineHeight:1.6,whiteSpace:'pre-wrap' }}>{SETUP_SQL}</pre>
+      </div>
+      <div style={{ display:'flex',gap:8,flexWrap:'wrap' }}>
+        <button style={{ ...BS,background:copied?'#059669':'#1A56DB',color:'#fff',borderColor:copied?'#059669':'#1A56DB' }} onClick={copy}>
+          {copied ? '✅ 복사됨!' : '📋 SQL 복사'}
+        </button>
+        <a href={supabaseUrl} target="_blank" rel="noreferrer" style={{ ...BS,background:'#111827',color:'#fff',borderColor:'#111827',textDecoration:'none',display:'inline-flex',alignItems:'center',gap:4 }}>
+          🔗 Supabase SQL 편집기 열기
+        </a>
+        <div style={{ fontSize:11,color:'#92400E',alignSelf:'center' }}>SQL 복사 → Supabase 열기 → 붙여넣기 → Run 클릭</div>
+      </div>
+    </div>
+  );
+}
+
 function AdminDash({ onBack, onGoShip, onLogout }) {
   const [apps,         setApps]         = useState([]);
   const [notice,       setNotice]       = useState({ title: "", body: "", deadline: "" });
   const [loading,      setLoading]      = useState(true);
   const [tab,          setTab]          = useState("list");
+  const [dbReady,      setDbReady]      = useState(true);
+  const [showSetup,    setShowSetup]    = useState(false);
   const [statusFilter, setStatusFilter] = useState("전체");
   const [typeFilter,   setTypeFilter]   = useState("전체");
   const [selected,     setSelected]     = useState(null);
@@ -876,6 +1005,14 @@ function AdminDash({ onBack, onGoShip, onLogout }) {
       setApps(a || []);
       setNotice(n || { title: "제품 신청 안내", body: "본품: 매달 첫째주 화요일 마감 / 샘플: 매달 10일 전 영업일 마감", deadline: "" });
       setEmployees(emps || []);
+      // DB 테이블 존재 여부 체크
+      const [sr, lr] = await Promise.all([
+        sb.from('sessions').select('id').limit(1),
+        sb.from('access_logs').select('id').limit(1),
+      ]);
+      const ready = !sr.error && !lr.error;
+      setDbReady(ready);
+      if(!ready) setShowSetup(true);
     } catch(e) { console.error(e); }
     finally { setLoading(false); }
   }, []);
@@ -937,6 +1074,8 @@ function AdminDash({ onBack, onGoShip, onLogout }) {
 
   return (
     <div style={{ fontFamily: FF, maxWidth: 1000, margin: "0 auto", padding: "20px 14px 60px", display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* DB 설정 배너 */}
+      {showSetup && <DbSetupBanner onDismiss={()=>setShowSetup(false)} />}
       {/* 헤더 */}
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:"#fff", border:"1px solid #E5E7EB", borderRadius:12, padding:"16px 20px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", flexWrap:"wrap", gap:10 }}>
         <div style={{ display:"flex", alignItems:"center", gap:12 }}>
@@ -1557,6 +1696,18 @@ function EmployeeManager({ employees, onReload }) {
     catch(e) { alert("삭제 중 오류가 발생했습니다."); }
   };
 
+  const [editId,   setEditId]   = useState(null);
+  const [editForm, setEditForm] = useState({});
+  const startEdit = (emp) => { setEditId(emp.id); setEditForm({ name:emp.name, dept:emp.dept, hire_date:emp.hire_date }); };
+  const cancelEdit = () => { setEditId(null); setEditForm({}); };
+  const handleEditSave = async () => {
+    if(!editForm.name.trim()){ alert('이름을 입력해주세요.'); return; }
+    if(!editForm.dept){ alert('부서를 선택해주세요.'); return; }
+    if(!editForm.hire_date){ alert('입사일을 입력해주세요.'); return; }
+    try { await updateEmployee(editId, editForm.name.trim(), editForm.dept, editForm.hire_date); setEditId(null); onReload(); }
+    catch { alert('수정 중 오류가 발생했습니다.'); }
+  };
+
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
       {/* 엑셀 업로드 */}
@@ -1630,6 +1781,7 @@ function EmployeeManager({ employees, onReload }) {
               <thead>
                 <tr style={{ background:"#F9FAFB" }}>
                   {["이름","부서","입사일","신청 가능일","PIN",""].map(h => <th key={h} style={TH}>{h}</th>)}
+
                 </tr>
               </thead>
               <tbody>
@@ -1637,27 +1789,52 @@ function EmployeeManager({ employees, onReload }) {
                   const hire = new Date(emp.hire_date);
                   const avail = new Date(hire); avail.setMonth(avail.getMonth() + 3);
                   const canApply = new Date() >= avail;
+                  const isEdit = editId === emp.id;
                   return (
-                    <tr key={emp.id}>
-                      <td style={{ ...TD, fontWeight:600 }}>{emp.name}</td>
-                      <td style={TD}>{emp.dept}</td>
-                      <td style={{ ...TD, fontFamily:"monospace" }}>{emp.hire_date}</td>
+                    <tr key={emp.id} style={{ background: isEdit ? '#F0F9FF' : undefined }}>
+                      <td style={{ ...TD, fontWeight:600 }}>
+                        {isEdit
+                          ? <input style={{ ...INP, padding:'5px 8px', fontSize:13, minWidth:80 }} value={editForm.name} onChange={e=>setEditForm(f=>({...f,name:e.target.value}))} />
+                          : emp.name}
+                      </td>
+                      <td style={TD}>
+                        {isEdit
+                          ? <select style={{ ...INP, padding:'5px 8px', fontSize:13, minWidth:100 }} value={editForm.dept} onChange={e=>setEditForm(f=>({...f,dept:e.target.value}))}>
+                              <option value="" disabled>부서 선택</option>
+                              {DEPT_LIST.map(d=><option key={d} value={d}>{d}</option>)}
+                            </select>
+                          : emp.dept}
+                      </td>
+                      <td style={{ ...TD, fontFamily:"monospace" }}>
+                        {isEdit
+                          ? <input type="date" style={{ ...INP, padding:'5px 8px', fontSize:13 }} value={editForm.hire_date} onChange={e=>setEditForm(f=>({...f,hire_date:e.target.value}))} />
+                          : emp.hire_date}
+                      </td>
                       <td style={TD}>
                         <span style={{ color: canApply ? "#059669" : "#DC2626", fontWeight:600 }}>
                           {canApply ? "✅ 가능" : `${avail.getFullYear()}.${avail.getMonth()+1}.${avail.getDate()} 부터`}
                         </span>
                       </td>
                       <td style={TD}>
-                        <button style={{ ...BT,color:'#1A56DB',borderColor:'#C7D7FB' }} onClick={async()=>{
+                        {!isEdit && <button style={{ ...BT,color:'#1A56DB',borderColor:'#C7D7FB' }} onClick={async()=>{
                           const p=window.prompt(`"${emp.name}" PIN 설정 (현재: ${emp.pin??'0000'})\n새 PIN 입력:`);
                           if(p===null)return;
                           if(!p.trim()){ alert('PIN을 입력해주세요.'); return; }
                           try { await updateEmpPin(emp.id, p.trim()); onReload(); alert('PIN이 변경되었습니다.'); }
                           catch{ alert('변경 중 오류가 발생했습니다.'); }
-                        }}>PIN 설정</button>
+                        }}>PIN 설정</button>}
                       </td>
                       <td style={TD}>
-                        <button style={{ ...BT, color:"#DC2626", borderColor:"#FECACA" }} onClick={() => handleDelete(emp.id, emp.name)}>삭제</button>
+                        {isEdit
+                          ? <div style={{ display:'flex', gap:5 }}>
+                              <button style={{ ...BT,color:'#059669',borderColor:'#BBF7D0',background:'#F0FDF4' }} onClick={handleEditSave}>저장</button>
+                              <button style={{ ...BT }} onClick={cancelEdit}>취소</button>
+                            </div>
+                          : <div style={{ display:'flex', gap:5 }}>
+                              <button style={{ ...BT,color:'#1A56DB',borderColor:'#C7D7FB' }} onClick={()=>startEdit(emp)}>수정</button>
+                              <button style={{ ...BT, color:"#DC2626", borderColor:"#FECACA" }} onClick={() => handleDelete(emp.id, emp.name)}>삭제</button>
+                            </div>
+                        }
                       </td>
                     </tr>
                   );
@@ -1868,8 +2045,9 @@ function App() {
     if (!auth) return <AdminLogin onLogin={() => setAuth(true)} />;
     return <AdminDash onBack={() => setPage("employee")} onGoShip={() => setPage("ship")} onLogout={logout} />;
   }
-  if(!empAuth) return <EmployeeLogin onLogin={setEmpAuth} />;
-  return <EmployeePage notice={notice} onAdmin={() => setPage("admin")} empAuth={empAuth} onEmpLogout={empLogout} />;
+  if(!empAuth) return <EmployeeLogin onLogin={setEmpAuth} onAdminBypass={auth ? () => setPage("admin") : null} />;
+  const effectiveAuth = empAuth || (auth ? { id:0, name:"관리자", dept:"", token:"admin" } : null);
+  return <EmployeePage notice={notice} onAdmin={() => setPage("admin")} empAuth={effectiveAuth} onEmpLogout={empLogout} />;
 }
 
 
