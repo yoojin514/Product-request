@@ -199,23 +199,30 @@ const GLOBAL_CSS = `
   input[type="checkbox"] { -webkit-appearance: checkbox; }
   input[type="date"]     { -webkit-appearance: none; }
   body { margin: 0; padding: 0; background: #F4F5F7; }
-  @media (max-width: 600px) {
-    .pay-grid { grid-template-columns: 1fr !important; }
-    .action-bar { flex-direction: column !important; gap: 12px !important; align-items: stretch !important; }
-    .action-btns { flex-direction: column !important; }
-    .action-btns button { width: 100% !important; }
-    .rule-row { flex-direction: column !important; }
-    .rule-div  { width: 100% !important; height: 1px !important; margin: 10px 0 !important; }
-    .stat-grid { grid-template-columns: 1fr 1fr !important; }
-    .detail-grid { grid-template-columns: 1fr !important; }
-    .info-grid { grid-template-columns: 1fr !important; }
-    .ship-panels { flex-direction: column !important; }
-    .ship-sidebar { width: 100% !important; }
-    .emp-add-grid { grid-template-columns: 1fr 1fr !important; }
-    .admin-header-btns { flex-wrap: wrap !important; }
-    .emp-header { flex-direction: column !important; align-items: flex-start !important; gap: 8px !important; }
-    .emp-header-btns { flex-wrap: wrap !important; gap: 6px !important; }
-    .emp-header-btns button { flex: 1 1 auto !important; font-size: 11px !important; padding: 6px 8px !important; }
+  .info-grid    { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .pay-grid     { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat-grid    { display: grid; gap: 12px; }
+  .emp-add-grid { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 8px; align-items: end; }
+  @media (max-width: 640px) {
+    .info-grid    { grid-template-columns: 1fr; }
+    .info-grid .span2 { grid-column: span 1; }
+    .pay-grid     { grid-template-columns: 1fr; }
+    .action-bar   { flex-direction: column; gap: 12px; align-items: stretch; }
+    .action-btns  { flex-direction: column; }
+    .action-btns button { width: 100%; }
+    .rule-row     { flex-direction: column; }
+    .rule-div     { width: 100%; height: 1px; margin: 10px 0; }
+    .stat-grid    { grid-template-columns: 1fr 1fr; }
+    .detail-grid  { grid-template-columns: 1fr; }
+    .ship-panels  { flex-direction: column; }
+    .ship-sidebar { width: 100%; }
+    .emp-add-grid { grid-template-columns: 1fr 1fr; }
+    .emp-add-grid button { grid-column: span 2; }
+    .admin-header-btns { flex-wrap: wrap; }
+    .emp-header   { flex-direction: column; align-items: flex-start; gap: 8px; }
+    .emp-header-btns { flex-wrap: wrap; gap: 6px; width: 100%; }
+    .emp-header-btns button { flex: 1 1 auto; font-size: 11px; padding: 6px 8px; }
+    .product-tabs { overflow-x: auto; }
   }
 `;
 const FF = "'Noto Sans KR','Apple SD Gothic Neo',sans-serif";
@@ -612,7 +619,7 @@ function EmployeePage({ notice, onAdmin, empAuth, onEmpLogout }) {
       {/* 신청자 정보 */}
       <div style={CARD}>
         <SLabel>신청자 정보</SLabel>
-        <div className="info-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <div className="info-grid">
           <SField label="이름" required error={errors.name}>
             <input style={{ ...BINP(errors.name), ...(empAuth?{background:'#F9FAFB',color:'#374151'}:{}) }} placeholder="홍길동" value={form.name}
               readOnly={!!empAuth} onChange={empAuth ? undefined : e => setForm(f => ({ ...f, name: e.target.value }))} />
@@ -627,8 +634,8 @@ function EmployeePage({ notice, onAdmin, empAuth, onEmpLogout }) {
                 </select>
             }
           </SField>
-          {empError && <div style={{ gridColumn:"span 2", background:"#FEF2F2", color:"#DC2626", fontSize:13, padding:"10px 14px", borderRadius:8, fontWeight:600 }}>🚫 {empError}</div>}
-          <div style={{ gridColumn: "span 2" }}>
+          {empError && <div className="span2" style={{ gridColumn:"span 2", background:"#FEF2F2", color:"#DC2626", fontSize:13, padding:"10px 14px", borderRadius:8, fontWeight:600 }}>🚫 {empError}</div>}
+          <div className="span2" style={{ gridColumn: "span 2" }}>
             <SField label="신청일자">
               <DatePickerInput style={INP} value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
             </SField>
@@ -761,7 +768,7 @@ function EmployeePage({ notice, onAdmin, empAuth, onEmpLogout }) {
         <SLabel>결제 방법</SLabel>
         {errors.pay && <SErrMsg>{errors.pay}</SErrMsg>}
         {form.sampleItems.some(it => it.checked) && <div style={{ background: "#F0F9FF", border: "1px solid #BAE6FD", borderRadius: 7, padding: "10px 14px", fontSize: 13, color: "#0369A1", marginBottom: 12 }}>🧪 샘플은 <b>무통장 입금으로만</b> 구매 가능합니다.</div>}
-        <div className="pay-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <div className="pay-grid">
           {[["🏦","무통장입금","계좌이체"],["💳","카드결제","본품 전용 · 부가세 10% 추가"]].map(([icon, label, sub]) => {
             const blocked = label === "카드결제" && form.sampleItems.some(it => it.checked);
             return (
@@ -1097,7 +1104,7 @@ function AdminDash({ onBack, onGoShip, onLogout }) {
       </div>
 
       {/* 통계 카드 */}
-      <div className="stat-grid" style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12 }}>
+      <div className="stat-grid" style={{ gridTemplateColumns:"repeat(4,1fr)" }}>
         {[["전체",stats.total,"#1A56DB"],["접수",stats.접수,"#6366F1"],["출고준비",stats.출고준비,"#0891B2"],["반려",stats.반려,"#DC2626"]].map(([l,v,c]) => (
           <div key={l} onClick={() => { setTab("list"); setStatusFilter(l); }}
             style={{ background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,padding:"16px 18px",boxShadow:"0 1px 3px rgba(0,0,0,0.04)",borderTop:`3px solid ${c}`,cursor:"pointer",...(statusFilter===l&&tab==="list"?{boxShadow:`0 0 0 2px ${c}`}:{}) }}>
@@ -1437,7 +1444,7 @@ function ShipPage({ onBack }) {
         </div>
       </div>
 
-      <div className="stat-grid" style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12 }}>
+      <div className="stat-grid" style={{ gridTemplateColumns:"repeat(3,1fr)" }}>
         {[["전체 출고 대상",shipApps.length,"#1A56DB","전체"],["출고 예정",totalPending,"#F59E0B","출고예정"],["출고 완료",totalDone,"#059669","출고완료"]].map(([l,v,c,sf])=>(
           <div key={l} onClick={()=>{setMainTab("overview");setStatusFilter(sf);setSelectedKey(null);}} style={{ background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,padding:"16px 18px",boxShadow:"0 1px 3px rgba(0,0,0,0.04)",borderTop:`3px solid ${c}`,cursor:"pointer" }}>
             <div style={{ fontSize:22,fontWeight:800,color:c,fontFamily:"monospace" }}>{v}</div>
@@ -1756,7 +1763,7 @@ function EmployeeManager({ employees, onReload }) {
       {/* 직원 추가 폼 */}
       <div style={{ background:"#F9FAFB", border:"1px solid #E5E7EB", borderRadius:10, padding:"16px" }}>
         <div style={{ fontWeight:700, fontSize:14, marginBottom:12 }}>➕ 직원 개별 추가</div>
-        <div className="emp-add-grid" style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr auto", gap:8, alignItems:"end" }}>
+        <div className="emp-add-grid">
           <SField label="이름" required>
             <input style={INP} placeholder="홍길동" value={form.name} onChange={e => setForm(f=>({...f, name:e.target.value}))} />
           </SField>
