@@ -17,7 +17,7 @@
 </head>
 <body>
   <div id="root"></div>
-  <script type="text/babel">
+  <script type="text/babel" data-presets="env,react">
     const { useState, useEffect, useCallback, useRef } = React;
 
 
@@ -253,7 +253,7 @@ function EmployeePage({ notice, onAdmin }) {
     setForm(f => ({ ...f, sampleItems: f.sampleItems.map(it => it.id === id ? { ...it, qty: newQty } : it) }));
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const e = {};
     if (!form.name.trim()) e.name = "이름을 입력해주세요";
     if (!form.dept)        e.dept = "부서를 선택해주세요";
