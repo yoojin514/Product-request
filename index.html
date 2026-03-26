@@ -1062,6 +1062,43 @@ function AdminDash({ onBack, onGoShip, onLogout }) {
     const url=URL.createObjectURL(blob);const el=document.createElement("a");el.href=url;el.download=`신청내역_${today()}.csv`;el.click();URL.revokeObjectURL(url);
   };
 
+  const exportStatsXLSX = () => {
+    const wb = XLSX.utils.book_new();
+    // 제품별
+    const prodRows=[["제품명","총 수량","총 금액(원)"],...prodStats.map(p=>[p.name,p.qty,p.amount])];
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(prodRows),"제품별");
+    // 부서별
+    const deptRows=[["부서","신청 건수","본품 합계","샘플 합계","전체 합계","제품명","수량","금액"]];
+    deptStats.forEach(d=>{
+      const prods=Object.entries(d.products);
+      if(!prods.length){deptRows.push([d.dept,d.count,d.totalMain,d.totalSample,d.total,"","",""]);return;}
+      prods.forEach(([name,{qty,amount}],i)=>{
+        if(i===0)deptRows.push([d.dept,d.count,d.totalMain,d.totalSample,d.total,name,qty,amount]);
+        else deptRows.push(["","","","","",name,qty,amount]);
+      });
+    });
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(deptRows),"부서별");
+    // 결제수단별
+    const payRows=[["결제 수단","건수","비율(%)","총 금액(원)"],...payStats.map(p=>[p.pay,p.count,statApps.length>0?Math.round(p.count/statApps.length*100):0,p.total])];
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(payRows),"결제수단별");
+    XLSX.writeFile(wb,`통계_${rangeDesc}_${today()}.xlsx`);
+  };
+
+  const exportPersonXLSX = () => {
+    const wb = XLSX.utils.book_new();
+    const rows=[["이름","부서","신청 건수","본품 합계","샘플 합계","전체 합계","마지막 신청일","제품","수량","금액(원)"]];
+    personStats.forEach(p=>{
+      const prods=Object.entries(p.products);
+      if(!prods.length){rows.push([p.name,p.dept,p.count,p.totalMain,p.totalSample,p.total,p.lastDate,"","",""]);return;}
+      prods.forEach(([name,{qty,amount}],i)=>{
+        if(i===0)rows.push([p.name,p.dept,p.count,p.totalMain,p.totalSample,p.total,p.lastDate,name,qty,amount]);
+        else rows.push(["","","","","","","",name,qty,amount]);
+      });
+    });
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),"신청자별통계");
+    XLSX.writeFile(wb,`신청자별통계_${today()}.xlsx`);
+  };
+
   // 통계
   const getStatApps = () => {
     const now = new Date();
@@ -1257,8 +1294,11 @@ function AdminDash({ onBack, onGoShip, onLogout }) {
               <div><div style={{ fontSize:12,color:"#6B7280" }}>{rangeDesc} 총 신청 금액</div><div style={{ fontFamily:"monospace",fontWeight:800,fontSize:22,color:"#1A56DB" }}>{fmt(statTotal)}</div></div>
               <div style={{ textAlign:"right" }}><div style={{ fontSize:12,color:"#6B7280" }}>{rangeDesc} 신청 건수</div><div style={{ fontFamily:"monospace",fontWeight:800,fontSize:22 }}>{statApps.length}건</div></div>
             </div>
-            <div style={{ display:"flex",gap:6,marginBottom:14,flexWrap:"wrap" }}>
-              {[["prod","📦 제품별"],["dept","🏢 부서별"],["pay","💳 결제수단별"]].map(([k,l])=><button key={k} style={{ ...FB,...(statSubTab===k?FBA:{}) }} onClick={()=>setStatSubTab(k)}>{l}</button>)}
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8 }}>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                {[["prod","📦 제품별"],["dept","🏢 부서별"],["pay","💳 결제수단별"]].map(([k,l])=><button key={k} style={{ ...FB,...(statSubTab===k?FBA:{}) }} onClick={()=>setStatSubTab(k)}>{l}</button>)}
+              </div>
+              <button style={{ ...BS,background:"#F0FDF4",color:"#059669",borderColor:"#BBF7D0" }} onClick={exportStatsXLSX}>📊 엑셀 다운 (전체 시트)</button>
             </div>
             {statSubTab==="prod"&&(prodStats.length===0?<SAEmpty>{rangeDesc} 데이터 없음</SAEmpty>:<table style={{ width:"100%",borderCollapse:"collapse",fontSize:13 }}><thead><tr style={{ background:"#F9FAFB" }}>{["제품명","총 수량","총 금액"].map(h=><th key={h} style={TH}>{h}</th>)}</tr></thead><tbody>{prodStats.map((p,i)=><tr key={i}><td style={{ ...TD,fontWeight:600 }}>{p.name}</td><td style={{ ...TD,fontFamily:"monospace" }}>{p.qty.toLocaleString()}</td><td style={{ ...TD,fontFamily:"monospace",fontWeight:700,color:"#1A56DB" }}>{fmt(p.amount)}</td></tr>)}</tbody></table>)}
             {statSubTab==="dept"&&(deptStats.length===0?<SAEmpty>{rangeDesc} 데이터 없음</SAEmpty>:<div style={{ display:"flex",flexDirection:"column",gap:8 }}>{deptStats.map((d,i)=><DeptCard key={i} dept={d}/>)}</div>)}
@@ -1269,10 +1309,13 @@ function AdminDash({ onBack, onGoShip, onLogout }) {
         {/* 신청자별 통계 */}
         {tab==="person"&&(
           <>
-            <div style={{ position:"relative",marginBottom:16 }}>
-              <span style={{ position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:"#9CA3AF",pointerEvents:"none" }}>🔍</span>
-              <input style={{ ...INP,paddingLeft:36 }} placeholder="이름 또는 부서로 검색..." value={personSearch} onChange={e=>setPersonSearch(e.target.value)} />
-              {personSearch&&<button onClick={()=>setPersonSearch("")} style={{ position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",fontSize:16,color:"#9CA3AF",cursor:"pointer" }}>✕</button>}
+            <div style={{ display:"flex",gap:8,marginBottom:16,alignItems:"center" }}>
+              <div style={{ position:"relative",flex:1 }}>
+                <span style={{ position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:"#9CA3AF",pointerEvents:"none" }}>🔍</span>
+                <input style={{ ...INP,paddingLeft:36 }} placeholder="이름 또는 부서로 검색..." value={personSearch} onChange={e=>setPersonSearch(e.target.value)} />
+                {personSearch&&<button onClick={()=>setPersonSearch("")} style={{ position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",fontSize:16,color:"#9CA3AF",cursor:"pointer" }}>✕</button>}
+              </div>
+              <button style={{ ...BS,background:"#F0FDF4",color:"#059669",borderColor:"#BBF7D0",whiteSpace:"nowrap" }} onClick={exportPersonXLSX}>📊 엑셀 다운 ({personStats.length}명)</button>
             </div>
             <div style={{ display:"flex",gap:10,marginBottom:16 }}>
               <div style={{ background:"#F0F4FF",border:"1px solid #C7D7FB",borderRadius:8,padding:"10px 16px",flex:1 }}><div style={{ fontSize:11,color:"#6B7280" }}>총 신청자</div><div style={{ fontFamily:"monospace",fontWeight:800,fontSize:20,color:"#1A56DB" }}>{personStats.length}명</div></div>
@@ -1652,12 +1695,24 @@ function AccessLogViewer() {
 
   const filtered = search ? logs.filter(l=>l.employee_name?.includes(search)||l.employee_dept?.includes(search)||l.action?.includes(search)||l.ip?.includes(search)) : logs;
 
+  const exportLogsXLSX = () => {
+    const rows=[["시각","이름","부서","액션","IP","기기"],...filtered.map(l=>[
+      l.created_at?.replace('T',' ').slice(0,19)||'',
+      l.employee_name||'',l.employee_dept||'',
+      l.action||'',l.ip||'',l.user_agent||''
+    ])];
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),"접속로그");
+    XLSX.writeFile(wb,`접속로그_${today()}.xlsx`);
+  };
+
   return (
     <div style={{ display:'flex',flexDirection:'column',gap:12 }}>
       <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8 }}>
         <div style={{ fontSize:14,fontWeight:700 }}>🔍 접속 로그 (최근 300건)</div>
-        <div style={{ display:'flex',gap:8 }}>
+        <div style={{ display:'flex',gap:8,flexWrap:'wrap' }}>
           <input style={{ ...INP,width:200,padding:'7px 11px',fontSize:13 }} placeholder="이름/부서/액션/IP 검색" value={search} onChange={e=>setSearch(e.target.value)} />
+          <button style={{ ...BS,background:"#F0FDF4",color:"#059669",borderColor:"#BBF7D0" }} onClick={exportLogsXLSX}>📊 엑셀 다운 ({filtered.length}건)</button>
           <button style={BS} onClick={()=>{ setLoading(true); loadAccessLogs().then(d=>{ setLogs(d); setLoading(false); }); }}>🔄 새로고침</button>
         </div>
       </div>
