@@ -1047,7 +1047,7 @@ function AdminDash({ onBack, onGoShip, onLogout }) {
     try {
       const [a, n, emps] = await Promise.all([loadApplications(), loadNotice(), loadEmployees()]);
       setApps(a || []);
-      setNotice(n || { title: "제품 신청 안내", body: "본품: 매달 첫째주 화요일 마감 / 샘플: 매달 첫째주 화요일 마감", deadline: "" });
+      setNotice(n || { title: "제품 신청 안내", body: "매달 첫째주 화요일 마감", deadline: "" });
       setEmployees(emps || []);
       // DB 테이블 존재 여부 체크
       const [sr, lr] = await Promise.all([
