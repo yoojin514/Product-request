@@ -1560,10 +1560,27 @@ function ShipPage({ onBack }) {
                       </label>
                     </div>
                     <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
-                      {g.apps.map(a=><ShipPersonChip key={a.id} app={a} isBlue typeFilter="본품"
-                        checked={checkedShipIds.has(a.id)}
-                        onCheck={e=>{const n=new Set(checkedShipIds);e.target.checked?n.add(a.id):n.delete(a.id);setCheckedShipIds(n);}}
-                        onShip={()=>updateShip(a.id,a.shipStatus==="출고완료"?"출고예정":"출고완료")} />)}
+                      {(()=>{
+                        const pm={};
+                        g.apps.forEach(a=>{const k=`${a.name}__${a.dept}`;if(!pm[k])pm[k]={name:a.name,dept:a.dept,apps:[]};pm[k].apps.push(a);});
+                        return Object.values(pm).map((pg,pi)=>{
+                          const allDoneP=pg.apps.every(a=>a.shipStatus==="출고완료");
+                          const allChk=pg.apps.length>0&&pg.apps.every(a=>checkedShipIds.has(a.id));
+                          const prodMap={};pg.apps.forEach(a=>(a.mainProducts||[]).forEach(p=>{if(!prodMap[p.name])prodMap[p.name]=0;prodMap[p.name]+=Number(p.qty)||1;}));
+                          const prodStr=Object.entries(prodMap).map(([n,q])=>`${n} ${q}개`).join(" · ");
+                          return(
+                            <div key={pi} style={{ display:"flex",alignItems:"center",gap:8,background:allDoneP?"#F0FDF4":allChk?"#EEF3FF":"#F0F4FF",border:`1.5px solid ${allDoneP?"#BBF7D0":allChk?"#1A56DB":"#C7D7FB"}`,borderRadius:8,padding:"8px 12px" }}>
+                              <input type="checkbox" style={{ accentColor:"#1A56DB",flexShrink:0 }} checked={allChk} onChange={e=>{const n=new Set(checkedShipIds);pg.apps.forEach(a=>e.target.checked?n.add(a.id):n.delete(a.id));setCheckedShipIds(n);}} />
+                              <span style={{ fontSize:11,color:allDoneP?"#059669":"#F59E0B",fontWeight:700,flexShrink:0 }}>{allDoneP?"✅":"⏳"}</span>
+                              <div style={{ flex:1,minWidth:0 }}>
+                                <div style={{ fontWeight:700,fontSize:13 }}>{pg.name} <span style={{ fontSize:11,color:"#9CA3AF",fontWeight:400 }}>{pg.dept}</span>{pg.apps.length>1&&<span style={{ fontSize:10,background:"#E0E7FF",color:"#4338CA",borderRadius:20,padding:"1px 6px",marginLeft:4 }}>{pg.apps.length}건</span>}</div>
+                                {prodStr&&<div style={{ fontSize:11,color:"#374151",marginTop:2 }}>{prodStr}</div>}
+                              </div>
+                              <button style={{ fontSize:11,padding:"3px 10px",border:"none",borderRadius:5,cursor:"pointer",fontFamily:"inherit",fontWeight:700,flexShrink:0,background:allDoneP?"#059669":"#1A56DB",color:"#fff" }} onClick={()=>bulkShip(pg.apps.map(a=>a.id),allDoneP?"출고예정":"출고완료")}>{allDoneP?"완료":"예정"}</button>
+                            </div>
+                          );
+                        });
+                      })()}
                     </div>
                   </div>
                 </ShipPickupCard>
@@ -1589,10 +1606,27 @@ function ShipPage({ onBack }) {
                       </label>
                     </div>
                     <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
-                      {g.apps.map(a=><ShipPersonChip key={a.id} app={a} isBlue={false} typeFilter="샘플"
-                        checked={checkedShipIds.has(a.id)}
-                        onCheck={e=>{const n=new Set(checkedShipIds);e.target.checked?n.add(a.id):n.delete(a.id);setCheckedShipIds(n);}}
-                        onShip={()=>updateShip(a.id,a.shipStatus==="출고완료"?"출고예정":"출고완료")} />)}
+                      {(()=>{
+                        const pm={};
+                        g.apps.forEach(a=>{const k=`${a.name}__${a.dept}`;if(!pm[k])pm[k]={name:a.name,dept:a.dept,apps:[]};pm[k].apps.push(a);});
+                        return Object.values(pm).map((pg,pi)=>{
+                          const allDoneP=pg.apps.every(a=>a.shipStatus==="출고완료");
+                          const allChk=pg.apps.length>0&&pg.apps.every(a=>checkedShipIds.has(a.id));
+                          const prodMap={};pg.apps.forEach(a=>(a.sampleProducts||[]).forEach(p=>{if(!prodMap[p.name])prodMap[p.name]=0;prodMap[p.name]+=Number(p.qty)||1;}));
+                          const prodStr=Object.entries(prodMap).map(([n,q])=>`${n} ${q}개`).join(" · ");
+                          return(
+                            <div key={pi} style={{ display:"flex",alignItems:"center",gap:8,background:allDoneP?"#F0FDF4":allChk?"#ECFDF5":"#ECFDF5",border:`1.5px solid ${allDoneP?"#BBF7D0":allChk?"#059669":"#A7F3D0"}`,borderRadius:8,padding:"8px 12px" }}>
+                              <input type="checkbox" style={{ accentColor:"#059669",flexShrink:0 }} checked={allChk} onChange={e=>{const n=new Set(checkedShipIds);pg.apps.forEach(a=>e.target.checked?n.add(a.id):n.delete(a.id));setCheckedShipIds(n);}} />
+                              <span style={{ fontSize:11,color:allDoneP?"#059669":"#F59E0B",fontWeight:700,flexShrink:0 }}>{allDoneP?"✅":"⏳"}</span>
+                              <div style={{ flex:1,minWidth:0 }}>
+                                <div style={{ fontWeight:700,fontSize:13 }}>{pg.name} <span style={{ fontSize:11,color:"#9CA3AF",fontWeight:400 }}>{pg.dept}</span>{pg.apps.length>1&&<span style={{ fontSize:10,background:"#D1FAE5",color:"#065F46",borderRadius:20,padding:"1px 6px",marginLeft:4 }}>{pg.apps.length}건</span>}</div>
+                                {prodStr&&<div style={{ fontSize:11,color:"#374151",marginTop:2 }}>{prodStr}</div>}
+                              </div>
+                              <button style={{ fontSize:11,padding:"3px 10px",border:"none",borderRadius:5,cursor:"pointer",fontFamily:"inherit",fontWeight:700,flexShrink:0,background:allDoneP?"#059669":"#059669",color:"#fff" }} onClick={()=>bulkShip(pg.apps.map(a=>a.id),allDoneP?"출고예정":"출고완료")}>{allDoneP?"완료":"예정"}</button>
+                            </div>
+                          );
+                        });
+                      })()}
                     </div>
                   </div>
                 </ShipPickupCard>
